@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>seeds TEST</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="Source/Styles/index.css" />
+</head>
+
+<body>
+    <div id="ui">
+        <div id="cross"></div>
+
+        <div id="hot">
+            <div id="bar"></div>
+            <div id="sel"></div>
+        </div>
+
+        <div id="inv" class="hide">
+            <div id="pane">
+                <div id="grid"></div>
+                <div id="hint">E to close • Click to move • Shift+Click quick move</div>
+            </div>
+            <div id="carry" class="hide"></div>
+        </div>
+
+        <div id="tab" class="hide">
+            <div id="tabbox">
+                <div id="name">FarmSim</div>
+                <div id="stats">
+                    <div id="fps">FPS: 0</div>
+                    <div id="pos">XYZ: 0 0 0</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="msg" class="hide"></div>
+    </div>
+
+    <canvas id="c"></canvas>
+
+    <script type="module" src="Source/Scripts/index.js"></script>
+</body>
+
+</html>
