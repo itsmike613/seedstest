@@ -1,9 +1,8 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
-const W = 32;
-const H = 32;
-const Y0 = 0;
-const Y1 = 1;
+const W = 32, H = 32;
+const Y0 = 0, Y1 = 1;
+const INF = { x: 0, y: 1, z: 0 };
 
 const conf = {
     reach: 6,
@@ -11,15 +10,15 @@ const conf = {
     jump: 8.5,
     walk: 5.2,
     sprint: 8.4,
-    friction: 14,
+    fr: 14,
     air: 2.0,
     sens: 0.0024,
-    pick: 1.5,
-    hydrad: 5,
+    pick: 1.6,
+    hyd: 5,
     hydelay: 1.2,
     unhydelay: 2.5,
     regrow: 4.5,
-    growTick: 2.2
+    grow: 2.2
 };
 
 const root = {
@@ -37,22 +36,28 @@ const root = {
     }
 };
 
-const K = {};
-addEventListener("keydown", (e) => { K[e.code] = true; hookKey(e, true); });
-addEventListener("keyup", (e) => { K[e.code] = false; hookKey(e, false); });
+const K = Object.create(null);
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function now() { return performance.now() * 0.001; }
-function dist2(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
+function d2(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
+function key(x, y, z) { return `${x}|${y}|${z}`; }
+function parse(k) { const [x, y, z] = k.split("|").map(Number); return { x, y, z }; }
+function eqp(a, b) { return a.x === b.x && a.y === b.y && a.z === b.z; }
 
 const items = {
     hoe_wood: { k: "hoe_wood", n: "Wooden Hoe", t: "tool", stack: 1, img: "./Source/Assets/Tools/Hoes/wood.png" },
-    shovel_wood: { k: "shovel_wood", n: "Wooden Shovel", t: "tool", stack: 1, img: "./Source/Assets/Tools/Shovels/wooden.png" },
-    bucket_empty: { k: "bucket_empty", n: "Empty Bucket", t: "tool", stack: 1, img: "./Source/Assets/Blocks/water.png" }, // placeholder icon if you want
+    shovel_wood: { k: "shovel_wood", n: "Wooden Shovel", t: "tool", stack: 1, img: "./Source/Assets/Tools/Shovels/wood.png" },
+
+    bucket_empty: { k: "bucket_empty", n: "Empty Bucket", t: "tool", stack: 1, img: "./Source/Assets/Tools/Buckets/empty.png" },
+    bucket_full: { k: "bucket_full", n: "Water Bucket", t: "tool", stack: 1, img: "./Source/Assets/Tools/Buckets/full.png" },
+
     seed_wheat: { k: "seed_wheat", n: "Wheat Seeds", t: "seed", stack: 256, img: "./Source/Assets/Crops/Wheat/seed.png" },
     seed_carrot: { k: "seed_carrot", n: "Carrot Seeds", t: "seed", stack: 256, img: "./Source/Assets/Crops/Carrot/seed.png" },
+
     wheat: { k: "wheat", n: "Wheat", t: "food", stack: 256, img: "./Source/Assets/Crops/Wheat/wheat.png" },
     carrot: { k: "carrot", n: "Carrot", t: "food", stack: 256, img: "./Source/Assets/Crops/Carrot/carrot.png" },
+
     dirt: { k: "dirt", n: "Dirt", t: "block", stack: 256, img: "./Source/Assets/Blocks/dirt.png" },
     water: { k: "water", n: "Water", t: "block", stack: 256, img: "./Source/Assets/Blocks/water.png" }
 };
@@ -130,58 +135,44 @@ class Bag {
         if (c > 0) c = fill(this.inv);
         return c;
     }
-    take(slot, fromHot) {
-        const arr = fromHot ? this.hot : this.inv;
-        const i = slot;
-        const s = arr[i];
-        if (!s) return null;
-        arr[i] = null;
-        return s;
-    }
-    put(slot, fromHot, stack) {
-        const arr = fromHot ? this.hot : this.inv;
-        const it = items[stack.k];
-        const dst = arr[slot];
-        if (!dst) {
-            arr[slot] = stack;
-            return null;
-        }
-        if (dst.k === stack.k && it.stack > 1) {
-            const can = Math.min(it.stack - dst.c, stack.c);
-            dst.c += can; stack.c -= can;
-            if (stack.c <= 0) return null;
-            return stack;
-        }
-        arr[slot] = stack;
-        return dst;
-    }
-    moveQuick(slot, fromHot) {
-        const a = fromHot ? this.hot : this.inv;
-        const b = fromHot ? this.inv : this.hot;
-        const s = a[slot];
+    moveQuick(i, hot) {
+        const a = hot ? this.hot : this.inv;
+        const b = hot ? this.inv : this.hot;
+        const s = a[i];
         if (!s) return;
 
         const it = items[s.k];
-
-        // try stack first
         if (it.stack > 1) {
-            for (let i = 0; i < b.length; i++) {
-                const d = b[i];
+            for (let j = 0; j < b.length; j++) {
+                const d = b[j];
                 if (d && d.k === s.k && d.c < it.stack) {
                     const can = Math.min(it.stack - d.c, s.c);
                     d.c += can; s.c -= can;
-                    if (s.c <= 0) { a[slot] = null; return; }
+                    if (s.c <= 0) { a[i] = null; return; }
                 }
             }
         }
-        // then empty slot
-        for (let i = 0; i < b.length; i++) {
-            if (!b[i]) {
-                b[i] = s;
-                a[slot] = null;
+        for (let j = 0; j < b.length; j++) {
+            if (!b[j]) {
+                b[j] = s; a[i] = null;
                 return;
             }
         }
+    }
+    put(i, hot, st) {
+        const arr = hot ? this.hot : this.inv;
+        const dst = arr[i];
+        if (!dst) { arr[i] = st; return null; }
+
+        const it = items[st.k];
+        if (dst.k === st.k && it.stack > 1) {
+            const can = Math.min(it.stack - dst.c, st.c);
+            dst.c += can; st.c -= can;
+            if (st.c <= 0) return null;
+            return st;
+        }
+        arr[i] = st;
+        return dst;
     }
 }
 
@@ -192,9 +183,29 @@ class Tex {
     }
     async get(url) {
         if (this.m.has(url)) return this.m.get(url);
-        const t = await new Promise((res, rej) => {
-            this.l.load(url, res, undefined, rej);
+        // graceful fallback if missing files while you’re wiring assets
+        const t = await new Promise((res) => {
+            this.l.load(
+                url,
+                (tx) => res(tx),
+                undefined,
+                () => res(null)
+            );
         });
+        if (!t) {
+            const c = document.createElement("canvas");
+            c.width = c.height = 32;
+            const g = c.getContext("2d");
+            g.fillStyle = "#ff00ff"; g.fillRect(0, 0, 32, 32);
+            g.fillStyle = "#000"; g.fillRect(0, 0, 16, 16);
+            g.fillRect(16, 16, 16, 16);
+            const tx = new THREE.CanvasTexture(c);
+            tx.magFilter = THREE.NearestFilter;
+            tx.minFilter = THREE.NearestFilter;
+            tx.generateMipmaps = false;
+            this.m.set(url, tx);
+            return tx;
+        }
         t.magFilter = THREE.NearestFilter;
         t.minFilter = THREE.NearestFilter;
         t.generateMipmaps = false;
@@ -213,15 +224,15 @@ class Vox {
         this.mesh = new Map(); // key -> mesh
         this.map = new Map();  // key -> block id
 
-        this.water = new Set(); // keys of water sources
-        this.tilled = new Map(); // key -> {wet:boolean, ts:number}
-        this.crop = new Map(); // key -> {type, st, ts}
+        this.water = new Set();
+        this.tilled = new Map(); // key -> {wet,ts}
+        this.crop = new Map();   // key -> {type,st,ts}
 
         this.items = []; // drops
         this.parts = []; // particles
     }
-    key(x, y, z) { return `${x}|${y}|${z}`; }
-    parse(k) { const [x, y, z] = k.split("|").map(Number); return { x, y, z }; }
+
+    inPad(x, z) { return x >= 0 && z >= 0 && x < W && z < H; }
 
     async mat(url) {
         if (this.mats.has(url)) return this.mats.get(url);
@@ -231,30 +242,30 @@ class Vox {
         return m;
     }
 
+    get(x, y, z) { return this.map.get(key(x, y, z)); }
+
     async set(x, y, z, id) {
-        const k = this.key(x, y, z);
+        const k = key(x, y, z);
         const prev = this.map.get(k);
         if (prev === id) return;
 
-        // remove mesh
         if (this.mesh.has(k)) {
             this.s.remove(this.mesh.get(k));
             this.mesh.delete(k);
         }
+
         this.map.set(k, id);
 
-        // bookkeeping
         if (prev === "water") this.water.delete(k);
         if (id === "water") this.water.add(k);
 
         if (!id) return;
 
-        let b = blocks[id];
-        let m = await this.mat(b.img);
+        const b = blocks[id];
+        const m = await this.mat(b.img);
         const mesh = new THREE.Mesh(this.g, m);
         mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
 
-        // make water a bit shorter
         if (id === "water") {
             mesh.scale.y = 0.85;
             mesh.position.y -= 0.075;
@@ -264,35 +275,23 @@ class Vox {
         this.mesh.set(k, mesh);
     }
 
-    get(x, y, z) {
-        return this.map.get(this.key(x, y, z));
-    }
-
-    inPad(x, z) {
-        return x >= 0 && z >= 0 && x < W && z < H;
-    }
-
     async init() {
-        // y=0 unbreakable dirt
         for (let x = 0; x < W; x++) {
             for (let z = 0; z < H; z++) {
                 await this.set(x, Y0, z, "unbreak");
                 await this.set(x, Y1, z, "grass");
             }
         }
-        // corner infinite water at (0,1,0)
-        await this.set(0, Y1, 0, "water");
+        await this.set(INF.x, INF.y, INF.z, "water");
     }
 
     nearWater(x, z) {
-        for (let dx = -conf.hydrad; dx <= conf.hydrad; dx++) {
-            for (let dz = -conf.hydrad; dz <= conf.hydrad; dz++) {
+        for (let dx = -conf.hyd; dx <= conf.hyd; dx++) {
+            for (let dz = -conf.hyd; dz <= conf.hyd; dz++) {
                 const nx = x + dx, nz = z + dz;
                 if (!this.inPad(nx, nz)) continue;
-                const id = this.get(nx, Y1, nz);
-                if (id === "water") {
-                    const d = Math.sqrt(dx * dx + dz * dz);
-                    if (d <= conf.hydrad) return true;
+                if (this.get(nx, Y1, nz) === "water") {
+                    if (Math.sqrt(dx * dx + dz * dz) <= conf.hyd) return true;
                 }
             }
         }
@@ -304,15 +303,94 @@ class Vox {
         if (id !== "grass" && id !== "dirt") return false;
         if (!this.nearWater(x, z)) return false;
         await this.set(x, Y1, z, "tilled_dry");
-        this.tilled.set(this.key(x, Y1, z), { wet: false, ts: now() });
+        this.tilled.set(key(x, Y1, z), { wet: false, ts: now() });
         return true;
+    }
+
+    async plant(x, z, type) {
+        const id = this.get(x, Y1, z);
+        if (id !== "tilled_dry" && id !== "tilled_wet") return false;
+        const k = key(x, Y1, z);
+        if (this.crop.has(k)) return false;
+        this.crop.set(k, { type, st: 0, ts: now() });
+        await this.cropMesh(x, Y1, z, type, 0);
+        return true;
+    }
+
+    async cropMesh(x, y, z, type, st) {
+        const a = key(x, y, z) + "|crop";
+        const b = a + "b";
+        if (this.mesh.has(a)) { this.s.remove(this.mesh.get(a)); this.mesh.delete(a); }
+        if (this.mesh.has(b)) { this.s.remove(this.mesh.get(b)); this.mesh.delete(b); }
+
+        const list = crops[type].stages;
+        const url = list[clamp(st, 0, list.length - 1)];
+        const tx = await this.t.get(url);
+        const m = new THREE.MeshLambertMaterial({ map: tx, transparent: true, depthWrite: false });
+        const g = new THREE.PlaneGeometry(1, 1);
+
+        const p = new THREE.Vector3(x + 0.5, y + 1.0, z + 0.5);
+
+        const m1 = new THREE.Mesh(g, m);
+        m1.position.copy(p);
+        m1.rotation.y = Math.PI * 0.25;
+        m1.scale.set(0.95, 0.95, 0.95);
+        this.s.add(m1); this.mesh.set(a, m1);
+
+        const m2 = new THREE.Mesh(g, m);
+        m2.position.copy(p);
+        m2.rotation.y = -Math.PI * 0.25;
+        m2.scale.copy(m1.scale);
+        this.s.add(m2); this.mesh.set(b, m2);
+    }
+
+    killCrop(x, z) {
+        const k = key(x, Y1, z);
+        this.crop.delete(k);
+        const a = k + "|crop";
+        const b = a + "b";
+        if (this.mesh.has(a)) { this.s.remove(this.mesh.get(a)); this.mesh.delete(a); }
+        if (this.mesh.has(b)) { this.s.remove(this.mesh.get(b)); this.mesh.delete(b); }
+    }
+
+    async breakCrop(x, z) {
+        const k = key(x, Y1, z);
+        if (!this.crop.has(k)) return false;
+        const c = this.crop.get(k);
+        // instant break
+        await this.dropCrop(x, Y1, z, c.type, false);
+        this.killCrop(x, z);
+        return true;
+    }
+
+    async dropCrop(x, y, z, type, popped) {
+        const c = crops[type];
+        const k = key(x, Y1, z);
+        const cur = this.crop.get(k);
+        const st = cur ? cur.st : (c.stages.length - 1);
+        const max = c.stages.length - 1;
+
+        if (popped) {
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
+            return;
+        }
+
+        if (st >= max) {
+            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), rnd(c.drop.min, c.drop.max));
+            const b = rnd(c.bonus.min, c.bonus.max);
+            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), b);
+        } else {
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
+        }
+        this.partsBurst(x, y, z);
     }
 
     async hydrateTick() {
         const t = now();
         for (const [k, v] of this.tilled) {
-            const p = this.parse(k);
+            const p = parse(k);
             const has = this.nearWater(p.x, p.z);
+
             if (has) {
                 if (!v.wet && (t - v.ts) > conf.hydelay) {
                     v.wet = true; v.ts = t;
@@ -322,13 +400,14 @@ class Vox {
                 if (v.wet && (t - v.ts) > conf.unhydelay) {
                     v.wet = false; v.ts = t;
                     await this.set(p.x, p.y, p.z, "tilled_dry");
-                    // pop crop if any
-                    const ck = this.key(p.x, p.y, p.z);
+
+                    // pop crop + revert soil chain
+                    const ck = key(p.x, p.y, p.z);
                     if (this.crop.has(ck)) {
                         const c = this.crop.get(ck);
-                        await this.dropCrop(p.x, p.y + 1, p.z, c.type, true);
-                        this.crop.delete(ck);
-                        // land to dirt then regrow grass
+                        await this.dropCrop(p.x, p.y, p.z, c.type, true);
+                        this.killCrop(p.x, p.z);
+
                         await this.set(p.x, p.y, p.z, "dirt");
                         this.tilled.delete(ck);
                         this.regrowLater(p.x, p.y, p.z);
@@ -338,51 +417,15 @@ class Vox {
         }
     }
 
-    async plant(x, z, type) {
-        const id = this.get(x, Y1, z);
-        if (id !== "tilled_dry" && id !== "tilled_wet") return false;
-        const k = this.key(x, Y1, z);
-        if (this.crop.has(k)) return false;
-        this.crop.set(k, { type, st: 0, ts: now() });
-        await this.cropMesh(x, Y1, z, type, 0);
-        return true;
-    }
-
-    async cropMesh(x, y, z, type, st) {
-        const k = this.key(x, y, z) + "|crop";
-        if (this.mesh.has(k)) {
-            this.s.remove(this.mesh.get(k));
-            this.mesh.delete(k);
-        }
-        const list = crops[type].stages;
-        const url = list[clamp(st, 0, list.length - 1)];
-        const tx = await this.t.get(url);
-        const m = new THREE.MeshLambertMaterial({ map: tx, transparent: true });
-        const g = new THREE.PlaneGeometry(1, 1);
-        const a = new THREE.Mesh(g, m);
-        a.position.set(x + 0.5, y + 1.0, z + 0.5);
-        a.rotation.y = Math.PI * 0.25;
-        a.scale.set(0.95, 0.95, 0.95);
-        this.s.add(a);
-        this.mesh.set(k, a);
-
-        const b = new THREE.Mesh(g, m);
-        b.position.copy(a.position);
-        b.rotation.y = -Math.PI * 0.25;
-        b.scale.copy(a.scale);
-        this.s.add(b);
-        this.mesh.set(k + "b", b);
-    }
-
     async growTick() {
         const t = now();
         for (const [k, c] of this.crop) {
-            if ((t - c.ts) < conf.growTick) continue;
-            const p = this.parse(k);
+            if ((t - c.ts) < conf.grow) continue;
+            c.ts = t;
+
+            const p = parse(k);
             const soil = this.get(p.x, p.y, p.z);
             const wet = (soil === "tilled_wet");
-            // simple: if dry, slower
-            c.ts = t;
             if (!wet && Math.random() < 0.6) continue;
 
             const max = crops[c.type].stages.length - 1;
@@ -393,120 +436,81 @@ class Vox {
         }
     }
 
-    async breakBlock(x, y, z) {
-        const id = this.get(x, y, z);
-        if (!id) return null;
-        const b = blocks[id];
-        if (!b.breakable) return null;
-
-        // if crop on soil, breaking soil pops crop too
-        if (y === Y1) {
-            const ck = this.key(x, y, z);
-            if (this.crop.has(ck)) {
-                const c = this.crop.get(ck);
-                await this.dropCrop(x, y + 1, z, c.type, false);
-                this.crop.delete(ck);
-                this.killCropMesh(ck);
-            }
-            // breaking tilled -> dirt item
-            if (id === "tilled_dry" || id === "tilled_wet") {
-                this.tilled.delete(ck);
-                await this.set(x, y, z, "dirt");
-                this.spawnItem("dirt", new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
-                this.partsBurst(x, y, z, id);
-                this.regrowLater(x, y, z);
-                return "dirt";
-            }
-        }
-
-        // water -> bucket not implemented; allow replacing by dirt via place
-        if (id === "water") {
-            await this.set(x, y, z, "grass");
-            this.partsBurst(x, y, z, id);
-            return "water";
-        }
-
-        // grass/dirt normal
-        await this.set(x, y, z, "dirt");
-        this.spawnItem("dirt", new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
-        this.partsBurst(x, y, z, id);
-        this.regrowLater(x, y, z);
-        return "dirt";
-    }
-
-    killCropMesh(ck) {
-        const a = ck + "|crop";
-        if (this.mesh.has(a)) { this.s.remove(this.mesh.get(a)); this.mesh.delete(a); }
-        if (this.mesh.has(a + "b")) { this.s.remove(this.mesh.get(a + "b")); this.mesh.delete(a + "b"); }
-    }
-
-    async dropCrop(x, y, z, type, popped) {
-        const c = crops[type];
-        const max = c.stages.length - 1;
-
-        // if popped early: just seed back
-        if (popped) {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 0.2, z + 0.5), 1);
-            return;
-        }
-
-        // matured check by mesh stage stored in map key
-        const ck = this.key(x, Y1, z);
-        const cur = this.crop.get(ck);
-        const st = cur ? cur.st : max;
-
-        if (st >= max) {
-            const d = rnd(c.drop.min, c.drop.max);
-            const b = rnd(c.bonus.min, c.bonus.max);
-            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 0.2, z + 0.5), d);
-            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 0.2, z + 0.5), b);
-        } else {
-            // not mature: drop seed only
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 0.2, z + 0.5), 1);
-        }
-        this.partsBurst(x, Y1, z, type);
-    }
-
     regrowLater(x, y, z) {
-        const k = this.key(x, y, z);
         setTimeout(async () => {
-            // only regrow if still dirt
             if (this.get(x, y, z) === "dirt") {
                 await this.set(x, y, z, "grass");
             }
         }, conf.regrow * 1000);
     }
 
+    async breakBlock(x, y, z) {
+        // protect infinite source
+        if (x === INF.x && y === INF.y && z === INF.z) return null;
+
+        const id = this.get(x, y, z);
+        if (!id) return null;
+        if (!blocks[id].breakable) return null;
+
+        // if soil w/ crop, breaking soil pops crop first
+        if (y === Y1) {
+            await this.breakCrop(x, z); // ok if none
+            const ck = key(x, y, z);
+            if (id === "tilled_dry" || id === "tilled_wet") {
+                this.tilled.delete(ck);
+            }
+        }
+
+        // water breaks to grass (not infinite)
+        if (id === "water") {
+            await this.set(x, y, z, "grass");
+            this.partsBurst(x, y, z);
+            return "water";
+        }
+
+        // grass/dirt/tilled -> becomes grass? (we keep: becomes dirt, drops dirt)
+        await this.set(x, y, z, "dirt");
+        this.spawnItem("dirt", new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
+        this.partsBurst(x, y, z);
+        this.regrowLater(x, y, z);
+        return "dirt";
+    }
+
     async place(x, y, z, id) {
         if (!this.inPad(x, z)) return false;
         if (y !== Y1) return false;
 
-        // can't place into unbreakable layer
-        if (this.get(x, Y0, z) === "unbreak" && y === Y0) return false;
+        // can't touch infinite water tile
+        if (x === INF.x && y === INF.y && z === INF.z) return false;
 
-        // allow replacing grass/dirt/tilled/water
         await this.set(x, y, z, id);
-
-        // if water removed by placing dirt/grass, hydration will decay and pop crops
         return true;
     }
 
     spawnItem(k, p, c) {
-        // merge nearby same items if possible
+        const it = items[k];
+        if (!it) return;
+
+        // merge nearby
         for (const d of this.items) {
-            if (d.k === k && dist2(d.p, p) < 0.6 * 0.6 && items[k].stack > 1) {
-                d.c = Math.min(items[k].stack, d.c + c);
+            if (d.k === k && it.stack > 1 && d2(d.p, p) < 0.5 * 0.5) {
+                d.c = Math.min(it.stack, d.c + c);
                 return;
             }
         }
-        this.items.push({ k, c, p: p.clone(), v: new THREE.Vector3((Math.random() - 0.5) * 1.2, 2.2, (Math.random() - 0.5) * 1.2), m: null });
+        this.items.push({
+            k, c,
+            p: p.clone(),
+            v: new THREE.Vector3((Math.random() - 0.5) * 1.2, 2.0, (Math.random() - 0.5) * 1.2),
+            m: null
+        });
     }
 
     async itemMesh(d) {
         if (d.m) return;
         const tx = await this.t.get(items[d.k].img);
-        const m = new THREE.SpriteMaterial({ map: tx, transparent: true });
-        const s = new THREE.Sprite(m);
+        const mat = new THREE.SpriteMaterial({ map: tx, transparent: true, depthWrite: false });
+        const s = new THREE.Sprite(mat);
         s.scale.set(0.6, 0.6, 0.6);
         s.position.copy(d.p);
         this.s.add(s);
@@ -521,7 +525,7 @@ class Vox {
             d.v.y -= 18 * dt;
             d.p.addScaledVector(d.v, dt);
 
-            // floor (y=1 top)
+            // floor at y=1 top
             const fy = Y1 + 1.02;
             if (d.p.y < fy) {
                 d.p.y = fy;
@@ -530,13 +534,13 @@ class Vox {
                 d.v.z *= 0.78;
             }
 
-            // bob
             const bob = Math.sin(now() * 4 + i) * 0.03;
             d.m.position.set(d.p.x, d.p.y + bob, d.p.z);
 
-            // pick
-            if (dist2(pl, d.p) < conf.pick * conf.pick) {
-                let left = bag.add(d.k, d.c);
+            // pickup (use player feet-ish instead of eye)
+            const pp = new THREE.Vector3(pl.x, pl.y - 1.2, pl.z);
+            if (d2(pp, d.p) < conf.pick * conf.pick) {
+                const left = bag.add(d.k, d.c);
                 if (left <= 0) {
                     this.s.remove(d.m);
                     this.items.splice(i, 1);
@@ -547,22 +551,25 @@ class Vox {
         }
     }
 
-    partsBurst(x, y, z, id) {
+    partsBurst(x, y, z) {
         const n = 14;
         for (let i = 0; i < n; i++) {
-            const p = new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5);
-            const v = new THREE.Vector3((Math.random() - 0.5) * 4, Math.random() * 4.2, (Math.random() - 0.5) * 4);
-            const life = 0.45 + Math.random() * 0.35;
-            this.parts.push({ p, v, life, t: 0, m: null });
+            this.parts.push({
+                p: new THREE.Vector3(x + 0.5, y + 0.6, z + 0.5),
+                v: new THREE.Vector3((Math.random() - 0.5) * 4, Math.random() * 4.2, (Math.random() - 0.5) * 4),
+                t: 0,
+                life: 0.35 + Math.random() * 0.35,
+                m: null
+            });
         }
     }
 
-    partsTick(dt) {
+    partsTick(dt, cam) {
         for (let i = this.parts.length - 1; i >= 0; i--) {
             const d = this.parts[i];
             if (!d.m) {
                 const g = new THREE.PlaneGeometry(0.12, 0.12);
-                const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+                const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
                 const a = new THREE.Mesh(g, m);
                 this.s.add(a);
                 d.m = a;
@@ -581,10 +588,9 @@ class Vox {
     }
 }
 
-function rnd(a, b) {
-    return Math.floor(a + Math.random() * (b - a + 1));
-}
+function rnd(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
 
+// --- three ---
 const ren = new THREE.WebGLRenderer({ canvas: root.el.c, antialias: false });
 ren.setPixelRatio(Math.min(devicePixelRatio, 2));
 ren.setSize(innerWidth, innerHeight, false);
@@ -594,8 +600,6 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x69b7ff, 18, 55);
 
 const cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 200);
-cam.position.set(1.2, 2.7, 1.2);
-
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 sun.position.set(2, 8, 3);
 scene.add(sun);
@@ -607,12 +611,11 @@ addEventListener("resize", () => {
     ren.setSize(innerWidth, innerHeight, false);
 });
 
+// --- world ---
 const tex = new Tex();
 const vox = new Vox(scene, tex);
 
-const ray = new THREE.Raycaster();
-ray.far = conf.reach;
-
+// --- player ---
 const pl = {
     p: new THREE.Vector3(1.35, 2.65, 1.35),
     v: new THREE.Vector3(),
@@ -622,8 +625,6 @@ const pl = {
 };
 
 const bag = new Bag();
-
-// starter loadout (spawn with items)
 bag.hot[0] = { k: "hoe_wood", c: 1 };
 bag.hot[1] = { k: "shovel_wood", c: 1 };
 bag.hot[2] = { k: "bucket_empty", c: 1 };
@@ -633,19 +634,35 @@ bag.hot[4] = { k: "seed_carrot", c: 3 };
 let lock = false;
 let open = false;
 let tab = false;
-let brk = false;
-let last = performance.now();
-let acc = 0, frames = 0, fps = 0;
 
-const holo = { m: null };
+// mining state
+const mine = { on: false, k: "", p: { x: 0, y: 0, z: 0 }, t: 0, need: 0.8 };
+const crack = { m: null, tx: [], st: 0 };
+
+const ray = new THREE.Raycaster();
+ray.far = conf.reach;
 
 function msg(t) {
     root.el.msg.textContent = t;
     root.el.msg.classList.remove("hide");
     clearTimeout(msg._t);
-    msg._t = setTimeout(() => root.el.msg.classList.add("hide"), 1200);
+    msg._t = setTimeout(() => root.el.msg.classList.add("hide"), 1100);
 }
 
+function prevent(e) {
+    // stop browser shortcuts while playing OR inventory open
+    if (lock || open) {
+        // block most defaults (scroll, find, save, print, open, etc.)
+        if (
+            e.code === "Space" || e.code === "Tab" ||
+            e.ctrlKey || e.metaKey || e.altKey
+        ) {
+            e.preventDefault();
+        }
+    }
+}
+
+// --- UI inventory ---
 function uiBuild() {
     root.el.bar.innerHTML = "";
     for (let i = 0; i < 9; i++) {
@@ -653,17 +670,19 @@ function uiBuild() {
         s.className = "slot";
         root.el.bar.appendChild(s);
     }
+
     root.el.grid.innerHTML = "";
     const make = (i, hot) => {
         const s = document.createElement("div");
         s.className = "slot";
         s.dataset.i = String(i);
         s.dataset.h = hot ? "1" : "0";
-        s.addEventListener("click", (e) => slotClick(e));
+        s.addEventListener("mousedown", (e) => slotDown(e));
+        s.addEventListener("contextmenu", (e) => e.preventDefault());
         return s;
     };
+
     for (let i = 0; i < 36; i++) root.el.grid.appendChild(make(i, false));
-    // hotbar row at bottom of inventory
     for (let i = 0; i < 9; i++) {
         const a = make(i, true);
         a.style.marginTop = "10px";
@@ -671,18 +690,33 @@ function uiBuild() {
     }
 }
 
-function uiDraw() {
-    // hotbar
-    const slots = [...root.el.bar.children];
-    for (let i = 0; i < 9; i++) {
-        paint(slots[i], bag.hot[i]);
+function paint(el, st) {
+    el.innerHTML = "";
+    if (!st) return;
+
+    const a = document.createElement("div");
+    a.className = "icon";
+    a.style.backgroundImage = `url("${items[st.k].img}")`;
+    el.appendChild(a);
+
+    const it = items[st.k];
+    if (it.stack > 1 && st.c > 1) {
+        const n = document.createElement("div");
+        n.className = "num";
+        n.textContent = String(st.c);
+        el.appendChild(n);
     }
+}
+
+function uiDraw() {
+    const hs = [...root.el.bar.children];
+    for (let i = 0; i < 9; i++) paint(hs[i], bag.hot[i]);
     root.el.sel.style.transform = `translateX(${(44 + 6) * bag.sel}px)`;
 
     if (open) {
-        const slots2 = [...root.el.grid.children];
-        for (let i = 0; i < 36; i++) paint(slots2[i], bag.inv[i]);
-        for (let i = 0; i < 9; i++) paint(slots2[36 + i], bag.hot[i]);
+        const gs = [...root.el.grid.children];
+        for (let i = 0; i < 36; i++) paint(gs[i], bag.inv[i]);
+        for (let i = 0; i < 9; i++) paint(gs[36 + i], bag.hot[i]);
 
         if (bag.carry) {
             root.el.carry.classList.remove("hide");
@@ -706,24 +740,11 @@ function uiDraw() {
     }
 }
 
-function paint(el, st) {
-    el.innerHTML = "";
-    if (!st) return;
-    const a = document.createElement("div");
-    a.className = "icon";
-    a.style.backgroundImage = `url("${items[st.k].img}")`;
-    el.appendChild(a);
-
-    const it = items[st.k];
-    if (it.stack > 1 && st.c > 1) {
-        const n = document.createElement("div");
-        n.className = "num";
-        n.textContent = String(st.c);
-        el.appendChild(n);
-    }
-}
-
-function slotClick(e) {
+// Minecraft-ish drag:
+// left click: pick up / place / swap / merge
+// right click: place 1 / take half (optional simple)
+function slotDown(e) {
+    e.preventDefault();
     const el = e.currentTarget;
     const i = Number(el.dataset.i);
     const hot = el.dataset.h === "1";
@@ -734,14 +755,39 @@ function slotClick(e) {
         return;
     }
 
-    const src = hot ? bag.hot : bag.inv;
-    const cur = src[i];
+    const arr = hot ? bag.hot : bag.inv;
+    const cur = arr[i];
 
-    if (!bag.carry) {
-        if (cur) {
-            src[i] = null;
-            bag.carry = cur;
+    // right click: basic split/place-one behavior
+    if (e.button === 2) {
+        if (!bag.carry && cur && items[cur.k].stack > 1 && cur.c > 1) {
+            const half = Math.ceil(cur.c / 2);
+            bag.carry = { k: cur.k, c: half };
+            cur.c -= half;
+            if (cur.c <= 0) arr[i] = null;
+            return;
         }
+        if (bag.carry) {
+            const it = items[bag.carry.k];
+            if (!cur) {
+                arr[i] = { k: bag.carry.k, c: 1 };
+                bag.carry.c -= 1;
+                if (bag.carry.c <= 0) bag.carry = null;
+                return;
+            }
+            if (cur.k === bag.carry.k && it.stack > 1 && cur.c < it.stack) {
+                cur.c += 1;
+                bag.carry.c -= 1;
+                if (bag.carry.c <= 0) bag.carry = null;
+                return;
+            }
+        }
+        return;
+    }
+
+    // left click
+    if (!bag.carry) {
+        if (cur) { arr[i] = null; bag.carry = cur; }
         return;
     }
 
@@ -750,7 +796,24 @@ function slotClick(e) {
     bag.carry = left;
 }
 
+// --- input / pointer lock ---
+function setOpen(v) {
+    open = v;
+    root.el.inv.classList.toggle("hide", !open);
+    if (open) {
+        if (document.pointerLockElement) document.exitPointerLock();
+    }
+}
+
+document.addEventListener("pointerlockchange", () => {
+    lock = (document.pointerLockElement === root.el.c);
+});
+
 addEventListener("mousemove", (e) => {
+    if (open) {
+        root.el.carry.style.left = e.clientX + "px";
+        root.el.carry.style.top = e.clientY + "px";
+    }
     if (!lock || open) return;
     pl.yaw -= e.movementX * conf.sens;
     pl.pit -= e.movementY * conf.sens;
@@ -763,54 +826,63 @@ addEventListener("mousedown", async (e) => {
         root.el.c.requestPointerLock();
         return;
     }
-    if (e.button === 0) brk = true;
+    if (e.button === 0) mine.on = true;
     if (e.button === 2) await use();
 });
 
 addEventListener("mouseup", (e) => {
-    if (e.button === 0) brk = false;
+    if (e.button === 0) {
+        mine.on = false;
+        mine.t = 0;
+        crackHide();
+    }
 });
 
 addEventListener("contextmenu", (e) => e.preventDefault());
 
-document.addEventListener("pointerlockchange", () => {
-    lock = (document.pointerLockElement === root.el.c);
-});
+// key handling
+addEventListener("keydown", (e) => {
+    prevent(e);
+    K[e.code] = true;
 
-addEventListener("mousemove", (e) => {
-    if (!open) return;
-    root.el.carry.style.left = e.clientX + "px";
-    root.el.carry.style.top = e.clientY + "px";
-});
-
-function hookKey(e, down) {
-    if (e.code === "KeyE" && down) {
-        open = !open;
-        root.el.inv.classList.toggle("hide", !open);
-        if (open) brk = false;
+    if (e.code === "KeyE" && !e.repeat) {
+        setOpen(!open);
+        mine.on = false;
+        mine.t = 0;
+        crackHide();
     }
+
     if (e.code === "Tab") {
         e.preventDefault();
-        tab = down;
-        root.el.tab.classList.toggle("hide", !tab);
+        tab = true;
+        root.el.tab.classList.remove("hide");
     }
-    // hotbar 1-9
-    if (down) {
-        const n = "Digit123456789".indexOf(e.code.replace("Digit", "Digit"));
-        if (e.code.startsWith("Digit")) {
-            const k = Number(e.code.slice(5)) - 1;
-            if (k >= 0 && k < 9) bag.sel = k;
-        }
-    }
-}
 
+    if (e.code.startsWith("Digit")) {
+        const n = Number(e.code.slice(5)) - 1;
+        if (n >= 0 && n < 9) bag.sel = n;
+    }
+});
+
+addEventListener("keyup", (e) => {
+    prevent(e);
+    K[e.code] = false;
+
+    if (e.code === "Tab") {
+        e.preventDefault();
+        tab = false;
+        root.el.tab.classList.add("hide");
+    }
+});
+
+// --- camera / movement ---
+// IMPORTANT: Three camera default forward is -Z.
+// Make facing match camera so WASD feels correct.
 function facing() {
-    const f = new THREE.Vector3(
-        Math.sin(pl.yaw) * Math.cos(pl.pit),
-        Math.sin(pl.pit),
-        Math.cos(pl.yaw) * Math.cos(pl.pit)
-    );
-    return f.normalize();
+    const cx = -Math.sin(pl.yaw) * Math.cos(pl.pit);
+    const cy = Math.sin(pl.pit);
+    const cz = -Math.cos(pl.yaw) * Math.cos(pl.pit);
+    return new THREE.Vector3(cx, cy, cz).normalize();
 }
 
 function camSync() {
@@ -820,11 +892,18 @@ function camSync() {
     cam.rotation.x = pl.pit;
 }
 
+function damp(v, t, k, dt) {
+    const a = 1 - Math.exp(-k * dt);
+    return v + (t - v) * a;
+}
+
 function ctrl(dt) {
     const f = facing();
-    const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    const r = new THREE.Vector3().crossVectors(f, up).normalize(); // right
 
     let ax = 0, az = 0;
+    // Minecraft: W forward, S back, A left, D right
     if (K["KeyW"]) { ax += f.x; az += f.z; }
     if (K["KeyS"]) { ax -= f.x; az -= f.z; }
     if (K["KeyA"]) { ax -= r.x; az -= r.z; }
@@ -834,14 +913,12 @@ function ctrl(dt) {
     if (len > 0) { ax /= len; az /= len; }
 
     const sp = (K["ControlLeft"] || K["ControlRight"]) ? conf.sprint : conf.walk;
-
-    const on = pl.on;
-    const fr = on ? conf.friction : conf.air;
+    const fr = pl.on ? conf.fr : conf.air;
 
     pl.v.x = damp(pl.v.x, ax * sp, fr, dt);
     pl.v.z = damp(pl.v.z, az * sp, fr, dt);
 
-    if (on && (K["Space"])) {
+    if (pl.on && K["Space"]) {
         pl.v.y = conf.jump;
         pl.on = false;
     }
@@ -849,34 +926,26 @@ function ctrl(dt) {
     pl.v.y -= conf.grav * dt;
 }
 
-function damp(v, t, k, dt) {
-    const a = 1 - Math.exp(-k * dt);
-    return v + (t - v) * a;
-}
-
 function collide(dt) {
-    // integrate
     pl.p.x += pl.v.x * dt;
     pl.p.y += pl.v.y * dt;
     pl.p.z += pl.v.z * dt;
 
-    // platform boundary barrier (player radius-ish)
-    const padMin = 0.2;
-    const padMaxX = W - 0.2;
-    const padMaxZ = H - 0.2;
-    pl.p.x = clamp(pl.p.x, padMin, padMaxX);
-    pl.p.z = clamp(pl.p.z, padMin, padMaxZ);
+    // edge barrier
+    pl.p.x = clamp(pl.p.x, 0.2, W - 0.2);
+    pl.p.z = clamp(pl.p.z, 0.2, H - 0.2);
 
-    // floor collision with y=1 blocks (top at y=2)
     const bx = Math.floor(pl.p.x);
     const bz = Math.floor(pl.p.z);
     const under = vox.get(bx, Y1, bz);
 
-    let top = Y1 + 1; // block top surface is y=2
-    // water is shorter
-    if (under === "water") top = (Y1 + 1) - 0.15;
+    // ground surface
+    let top = Y1 + 1;
+    if (under === "water") top -= 0.15;
 
-    const feet = pl.p.y - 1.62; // approximate eye height 1.62
+    // approximate: camera is "head"; feet is ~1.62 below
+    const feet = pl.p.y - 1.62;
+
     if (feet < top) {
         pl.p.y += (top - feet);
         if (pl.v.y < 0) pl.v.y = 0;
@@ -885,66 +954,57 @@ function collide(dt) {
         pl.on = false;
     }
 
-    // keep head out of blocks (simple)
-    const head = pl.p.y + 0.2;
-    const above = vox.get(bx, Y1 + 1, bz);
-    if (above && head > Y1 + 2) {
-        pl.p.y = Y1 + 1.8;
-        pl.v.y = Math.min(pl.v.y, 0);
-    }
-
-    // don't sink below world
     pl.p.y = Math.max(pl.p.y, 1.4);
 }
 
-async function lookHit() {
+// --- raycast targeting ---
+async function hit() {
     camSync();
     ray.set(cam.position, facing());
     const hits = ray.intersectObjects([...vox.mesh.values()], false);
+    const h = hits.find(q => q.object.geometry && q.object.geometry.type === "BoxGeometry");
+    if (!h) return null;
 
-    // ignore crop planes and crop "b"
-    const usable = hits.find(h => {
-        const m = h.object;
-        // we only want block cubes (BoxGeometry)
-        return m.geometry && m.geometry.type === "BoxGeometry";
-    });
-    if (!usable) return null;
-
-    const p = usable.point.clone().addScaledVector(usable.face.normal, -0.01);
+    const p = h.point.clone().addScaledVector(h.face.normal, -0.01);
     const x = Math.floor(p.x);
     const y = Math.floor(p.y);
     const z = Math.floor(p.z);
 
-    const n = usable.face.normal;
+    const n = h.face.normal;
     const place = new THREE.Vector3(x, y, z).add(n);
-    return { x, y, z, nx: n.x, ny: n.y, nz: n.z, px: Math.floor(place.x), py: Math.floor(place.y), pz: Math.floor(place.z) };
+    return {
+        x, y, z,
+        px: Math.floor(place.x),
+        py: Math.floor(place.y),
+        pz: Math.floor(place.z),
+    };
 }
 
+// --- bucket + place + hoe + seeds ---
 async function use() {
     const s = bag.hot[bag.sel];
     if (!s) return;
 
-    const hit = await lookHit();
-    if (!hit) return;
+    const h = await hit();
+    if (!h) return;
 
-    const { x, y, z, px, py, pz } = hit;
     const held = items[s.k];
 
     // hoe till
     if (s.k === "hoe_wood") {
-        if (y === Y1) {
-            const ok = await vox.till(x, z);
+        if (h.y === Y1) {
+            const ok = await vox.till(h.x, h.z);
             if (!ok) msg("Needs water within 5");
         }
         return;
     }
 
-    // seeds plant
+    // plant seeds
     if (held.t === "seed") {
-        if (y === Y1) {
+        if (h.y === Y1) {
             const type = (s.k === "seed_wheat") ? "wheat" : (s.k === "seed_carrot" ? "carrot" : null);
             if (!type) return;
-            const ok = await vox.plant(x, z, type);
+            const ok = await vox.plant(h.x, h.z, type);
             if (ok) {
                 s.c -= 1;
                 if (s.c <= 0) bag.hot[bag.sel] = null;
@@ -953,93 +1013,238 @@ async function use() {
         return;
     }
 
-    // place dirt / water blocks (water only at y=1)
-    if (s.k === "dirt" || s.k === "water") {
-        // placing uses the adjacent cell (like Minecraft)
-        if (py !== Y1) return;
-        if (!vox.inPad(px, pz)) return;
+    // bucket interactions
+    if (s.k === "bucket_empty") {
+        // right click: take water (infinite fills, normal removes+fills)
+        if (h.x === INF.x && h.y === INF.y && h.z === INF.z) {
+            bag.hot[bag.sel] = { k: "bucket_full", c: 1 };
+            msg("Filled");
+            return;
+        }
+        if (vox.get(h.x, h.y, h.z) === "water" && h.y === Y1) {
+            // remove only non-infinite
+            await vox.set(h.x, h.y, h.z, "grass");
+            bag.hot[bag.sel] = { k: "bucket_full", c: 1 };
+            msg("Filled");
+            return;
+        }
+        return;
+    }
 
-        // don't place inside player (simple check)
-        const dx = px + 0.5 - pl.p.x;
-        const dz = pz + 0.5 - pl.p.z;
+    if (s.k === "bucket_full") {
+        // place water at adjacent spot, only Y=1, not infinite
+        if (h.py !== Y1) return;
+        if (h.px === INF.x && h.py === INF.y && h.pz === INF.z) return;
+
+        // don't place inside player
+        const dx = h.px + 0.5 - pl.p.x;
+        const dz = h.pz + 0.5 - pl.p.z;
         if (Math.hypot(dx, dz) < 0.6) return;
 
-        await vox.place(px, py, pz, s.k === "water" ? "water" : "dirt");
+        await vox.place(h.px, h.py, h.pz, "water");
+        bag.hot[bag.sel] = { k: "bucket_empty", c: 1 };
+        msg("Poured");
+        return;
+    }
+
+    // place dirt (drops)
+    if (s.k === "dirt") {
+        if (h.py !== Y1) return;
+        if (h.px === INF.x && h.py === INF.y && h.pz === INF.z) return;
+
+        const dx = h.px + 0.5 - pl.p.x;
+        const dz = h.pz + 0.5 - pl.p.z;
+        if (Math.hypot(dx, dz) < 0.6) return;
+
+        await vox.place(h.px, h.py, h.pz, "dirt");
         s.c -= 1;
         if (s.c <= 0) bag.hot[bag.sel] = null;
         return;
     }
 }
 
-async function breakTick() {
-    if (!brk) return;
-    const hit = await lookHit();
-    if (!hit) return;
-
-    // break block at hit x,y,z
-    await vox.breakBlock(hit.x, hit.y, hit.z);
-    brk = false; // single-tap feel (you can change to hold-to-mine)
-}
-
-async function holoInit() {
-    // simple sprite hologram with canvas (transparent rounded pixel-ish box)
-    const cvs = document.createElement("canvas");
-    cvs.width = 256; cvs.height = 64;
-    const g = cvs.getContext("2d");
-
-    function draw() {
-        g.clearRect(0, 0, cvs.width, cvs.height);
-        // box
-        g.fillStyle = "rgba(0,0,0,0.55)";
-        round(g, 8, 8, 240, 48, 10);
-        g.fill();
-        g.strokeStyle = "rgba(255,255,255,0.18)";
+// --- crack overlay (mining animation) ---
+async function crackInit() {
+    // generate 10 crack textures (canvas) so you don’t need assets
+    for (let i = 0; i < 10; i++) {
+        const c = document.createElement("canvas");
+        c.width = c.height = 64;
+        const g = c.getContext("2d");
+        g.clearRect(0, 0, 64, 64);
+        g.strokeStyle = "rgba(255,255,255,0.65)";
         g.lineWidth = 2;
-        round(g, 8, 8, 240, 48, 10);
-        g.stroke();
 
-        g.fillStyle = "rgba(255,255,255,0.95)";
-        g.font = "32px 'Jersey 10'";
-        g.textAlign = "center";
-        g.textBaseline = "middle";
-        g.fillText("Infinite Water", 128, 32);
+        // more lines each stage
+        const n = 6 + i * 4;
+        for (let j = 0; j < n; j++) {
+            const x1 = Math.random() * 64, y1 = Math.random() * 64;
+            const x2 = Math.random() * 64, y2 = Math.random() * 64;
+            g.beginPath();
+            g.moveTo(x1, y1);
+            g.lineTo(x2, y2);
+            g.stroke();
+        }
+
+        const tx = new THREE.CanvasTexture(c);
+        tx.magFilter = THREE.NearestFilter;
+        tx.minFilter = THREE.NearestFilter;
+        tx.generateMipmaps = false;
+        crack.tx.push(tx);
     }
-    draw();
 
-    const tx = new THREE.CanvasTexture(cvs);
-    tx.magFilter = THREE.NearestFilter;
-    tx.minFilter = THREE.NearestFilter;
-
-    const mat = new THREE.SpriteMaterial({ map: tx, transparent: true });
-    const spr = new THREE.Sprite(mat);
-    spr.position.set(0.5, Y1 + 2.2, 0.5);
-    spr.scale.set(3.2, 0.8, 1);
-    scene.add(spr);
-    holo.m = spr;
+    const mat = new THREE.SpriteMaterial({ map: crack.tx[0], transparent: true, depthWrite: false, opacity: 0.95 });
+    const s = new THREE.Sprite(mat);
+    s.visible = false;
+    s.scale.set(1.05, 1.05, 1.05);
+    scene.add(s);
+    crack.m = s;
 }
+
+function crackShow(x, y, z, stage) {
+    if (!crack.m) return;
+    crack.m.visible = true;
+    crack.m.position.set(x + 0.5, y + 0.5, z + 0.5);
+    crack.m.material.map = crack.tx[clamp(stage, 0, 9)];
+    crack.m.material.needsUpdate = true;
+}
+
+function crackHide() {
+    if (crack.m) crack.m.visible = false;
+}
+
+// --- mining logic ---
+function hardness(id) {
+    // base times (seconds)
+    if (id === "grass" || id === "dirt" || id === "tilled_dry" || id === "tilled_wet") return 0.85;
+    if (id === "water") return 0.25;
+    return 0.9;
+}
+
+function speedFor(id) {
+    // shovel speeds dirt/grass/farmland
+    const s = bag.hot[bag.sel];
+    const held = s ? s.k : "";
+    if (held === "shovel_wood") {
+        if (id === "grass" || id === "dirt" || id === "tilled_dry" || id === "tilled_wet") return 0.35;
+    }
+    return hardness(id);
+}
+
+async function mineTick(dt) {
+    if (!mine.on || open || !lock) return;
+
+    const h = await hit();
+    if (!h) { mine.t = 0; crackHide(); return; }
+
+    // crops are instant
+    if (h.y === Y1) {
+        const ck = key(h.x, Y1, h.z);
+        if (vox.crop.has(ck)) {
+            await vox.breakCrop(h.x, h.z);
+            mine.t = 0;
+            crackHide();
+            return;
+        }
+    }
+
+    // blocks
+    const id = vox.get(h.x, h.y, h.z);
+    if (!id) { mine.t = 0; crackHide(); return; }
+    if (!blocks[id].breakable) { mine.t = 0; crackHide(); return; }
+    if (h.x === INF.x && h.y === INF.y && h.z === INF.z) { mine.t = 0; crackHide(); return; }
+
+    const same = (mine.k === id && mine.p.x === h.x && mine.p.y === h.y && mine.p.z === h.z);
+    if (!same) {
+        mine.k = id;
+        mine.p = { x: h.x, y: h.y, z: h.z };
+        mine.t = 0;
+        mine.need = speedFor(id);
+    }
+
+    mine.need = speedFor(id);
+    mine.t += dt;
+
+    const prog = clamp(mine.t / mine.need, 0, 1);
+    const stage = Math.floor(prog * 10);
+    crackShow(h.x, h.y, h.z, stage);
+
+    if (mine.t >= mine.need) {
+        await vox.breakBlock(h.x, h.y, h.z);
+        mine.t = 0;
+        crackHide();
+    }
+}
+
+// --- hologram ---
+const holo = { m: null };
 
 function round(g, x, y, w, h, r) {
     g.beginPath();
     g.moveTo(x + r, y);
     g.arcTo(x + w, y, x + w, y + h, r);
     g.arcTo(x + w, y + h, x, y + h, r);
-    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y + h, x, y, x, r);
     g.arcTo(x, y, x + w, y, r);
     g.closePath();
 }
 
+async function holoInit() {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    const g = c.getContext("2d");
+
+    g.clearRect(0, 0, c.width, c.height);
+    g.fillStyle = "rgba(0,0,0,0.55)";
+    round(g, 8, 8, 240, 48, 10); g.fill();
+    g.strokeStyle = "rgba(255,255,255,0.18)";
+    g.lineWidth = 2; round(g, 8, 8, 240, 48, 10); g.stroke();
+
+    g.fillStyle = "rgba(255,255,255,0.95)";
+    g.font = "32px 'Jersey 10'";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("Infinite Water", 128, 32);
+
+    const tx = new THREE.CanvasTexture(c);
+    tx.magFilter = THREE.NearestFilter;
+    tx.minFilter = THREE.NearestFilter;
+    tx.generateMipmaps = false;
+
+    const mat = new THREE.SpriteMaterial({ map: tx, transparent: true, depthWrite: false });
+    const spr = new THREE.Sprite(mat);
+    spr.position.set(INF.x + 0.5, Y1 + 2.2, INF.z + 0.5);
+    spr.scale.set(3.2, 0.8, 1);
+    scene.add(spr);
+    holo.m = spr;
+}
+
 function holoTick() {
     if (!holo.m) return;
-    // keep readable size regardless of distance
     const d = cam.position.distanceTo(holo.m.position);
     const s = clamp(d * 0.18, 1.7, 4.2);
     holo.m.scale.set(3.2 * s * 0.35, 0.8 * s * 0.35, 1);
 }
 
-function tabTick() {
-    if (!tab) return;
-    root.el.fps.textContent = `FPS: ${fps}`;
-    root.el.pos.textContent = `XYZ: ${pl.p.x.toFixed(2)} ${pl.p.y.toFixed(2)} ${pl.p.z.toFixed(2)}`;
+// --- TAB ---
+let fpa = 0, fpf = 0, fps = 0;
+
+function tabTick(dt) {
+    fpa += dt; fpf++;
+    if (fpa >= 0.25) {
+        fps = Math.round(fpf / fpa);
+        fpa = 0; fpf = 0;
+    }
+    if (tab) {
+        root.el.fps.textContent = `FPS: ${fps}`;
+        root.el.pos.textContent = `XYZ: ${pl.p.x.toFixed(2)} ${pl.p.y.toFixed(2)} ${pl.p.z.toFixed(2)}`;
+    }
+}
+
+// --- main loop ---
+let last = performance.now();
+
+function ui() {
+    uiDraw();
 }
 
 async function loop() {
@@ -1047,51 +1252,43 @@ async function loop() {
     const dt = Math.min(0.033, (t - last) / 1000);
     last = t;
 
-    // fps
-    acc += dt; frames++;
-    if (acc >= 0.25) {
-        fps = Math.round(frames / acc);
-        acc = 0; frames = 0;
-    }
-
     if (lock && !open) {
         ctrl(dt);
         collide(dt);
     } else {
-        // mild gravity settle
+        // settle
         pl.v.y = Math.max(pl.v.y - conf.grav * dt, -20);
         collide(dt);
     }
 
     camSync();
 
-    await breakTick();
+    await mineTick(dt);
 
-    // world ticks
     await vox.hydrateTick();
     await vox.growTick();
     await vox.itemTick(dt, pl.p, bag);
-    vox.partsTick(dt);
+    vox.partsTick(dt, cam);
 
     holoTick();
-    tabTick();
+    tabTick(dt);
 
-    uiDraw();
-
+    ui();
     ren.render(scene, cam);
+
     requestAnimationFrame(loop);
 }
 
+// --- start ---
 async function start() {
     uiBuild();
-
+    await crackInit();
     await vox.init();
     await holoInit();
 
-    // spawn next to infinite water (corner)
+    // spawn next to infinite water
     pl.p.set(1.35, 2.65, 1.35);
 
-    // prevent right-click menu focusing issues
     msg("Click to play");
     requestAnimationFrame(loop);
 }
