@@ -1,10 +1,14 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 /**
- * Maintainer-focused refactor:
- * - Same gameplay/values/logic, reorganized into cohesive sections/classes.
- * - No behavior changes intended (same constants, same rules, same timings).
- * - Less global state: wrapped into a single Game instance with clear subsystems.
+ * Visual upgrade pass (shader-pack-ish vibe) WITHOUT changing gameplay rules:
+ * - Better lighting + shadows + tone mapping
+ * - Simple gradient sky
+ * - Slight atmospheric fog tuning
+ * - Subtle crop “wind sway”
+ * - Water looks nicer (standard material + gentle texture flow)
+ *
+ * No gameplay constants/logic changed.
  */
 
 // -----------------------------
@@ -222,6 +226,7 @@ class Tex {
             g.fillStyle = "#000"; g.fillRect(0, 0, 16, 16);
             g.fillRect(16, 16, 16, 16);
             const tx = new THREE.CanvasTexture(c);
+            tx.colorSpace = THREE.SRGBColorSpace;
             tx.magFilter = THREE.NearestFilter;
             tx.minFilter = THREE.NearestFilter;
             tx.generateMipmaps = false;
@@ -229,11 +234,78 @@ class Tex {
             return tx;
         }
 
+        // Visual: correct color space + crisp pixel look
+        t.colorSpace = THREE.SRGBColorSpace;
         t.magFilter = THREE.NearestFilter;
         t.minFilter = THREE.NearestFilter;
         t.generateMipmaps = false;
+
         this.m.set(url, t);
         return t;
+    }
+}
+
+// -----------------------------
+// Simple Gradient Sky (visual only)
+// -----------------------------
+class Sky {
+    constructor(scene) {
+        this.scene = scene;
+        this.m = null;
+    }
+
+    init() {
+        const g = new THREE.SphereGeometry(120, 24, 16);
+
+        const mat = new THREE.ShaderMaterial({
+            side: THREE.BackSide,
+            uniforms: {
+                top: { value: new THREE.Color(0x84c7ff) },
+                mid: { value: new THREE.Color(0x69b7ff) },
+                bot: { value: new THREE.Color(0xcfefff) },
+                time: { value: 0 }
+            },
+            vertexShader: `
+                varying vec3 vPos;
+                void main(){
+                    vPos = position;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vPos;
+                uniform vec3 top;
+                uniform vec3 mid;
+                uniform vec3 bot;
+                uniform float time;
+
+                void main(){
+                    float h = normalize(vPos).y * 0.5 + 0.5;
+                    // soft banding like “shader pack” sky
+                    float t1 = smoothstep(0.0, 0.55, h);
+                    float t2 = smoothstep(0.45, 1.0, h);
+
+                    vec3 col = mix(bot, mid, t1);
+                    col = mix(col, top, t2);
+
+                    // faint moving haze
+                    float haze = 0.015 * sin(time * 0.25 + h * 9.0);
+                    col += haze;
+
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `
+        });
+
+        const mesh = new THREE.Mesh(g, mat);
+        mesh.frustumCulled = false;
+        this.scene.add(mesh);
+        this.m = mesh;
+    }
+
+    tick() {
+        if (!this.m) return;
+        this.m.material.uniforms.time.value = now();
     }
 }
 
@@ -254,6 +326,9 @@ class Vox {
         this.tilled = new Map();
         this.crop = new Map();
 
+        // Visual: crop planes tracked for wind sway
+        this.cropPlanes = new Map(); // baseKey => array of meshes
+
         this.items = [];
         this.parts = [];
     }
@@ -271,11 +346,37 @@ class Vox {
         return Y1 + 1;
     }
 
-    async mat(url) {
-        if (this.mats.has(url)) return this.mats.get(url);
+    async mat(url, idHint = "") {
+        const mk = url + "|std|" + idHint;
+        if (this.mats.has(mk)) return this.mats.get(mk);
+
         const tx = await this.t.get(url);
-        const m = new THREE.MeshLambertMaterial({ map: tx, transparent: true });
-        this.mats.set(url, m);
+
+        // Visual: nicer response to lighting while keeping pixel textures
+        // Water gets a bit more “shiny/transparent”.
+        let m;
+        if (idHint === "water") {
+            tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+            tx.repeat.set(1, 1);
+            m = new THREE.MeshStandardMaterial({
+                map: tx,
+                transparent: true,
+                opacity: 0.85,
+                roughness: 0.18,
+                metalness: 0.0,
+                emissive: new THREE.Color(0x112244),
+                emissiveIntensity: 0.15
+            });
+        } else {
+            m = new THREE.MeshStandardMaterial({
+                map: tx,
+                transparent: true,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+        }
+
+        this.mats.set(mk, m);
         return m;
     }
 
@@ -302,9 +403,13 @@ class Vox {
         this.map.set(k, id);
 
         const b = blocks[id];
-        const m = await this.mat(b.img);
+        const m = await this.mat(b.img, id);
         const mesh = new THREE.Mesh(this.g, m);
         mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+
+        // Visual: shadows
+        mesh.castShadow = (id !== "water");
+        mesh.receiveShadow = true;
 
         if (id === "water") {
             mesh.scale.y = 0.85;
@@ -364,10 +469,13 @@ class Vox {
 
     async cropMesh(x, y, z, type, st) {
         const base = key(x, y, z) + "|crop";
+
+        // clear old planes
         for (let i = 0; i < 4; i++) {
             const kk = base + i;
             if (this.mesh.has(kk)) { this.s.remove(this.mesh.get(kk)); this.mesh.delete(kk); }
         }
+        this.cropPlanes.delete(base);
 
         const list = crops[type].stages;
         const url = list[clamp(st, 0, list.length - 1)];
@@ -384,14 +492,29 @@ class Vox {
         const p = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
 
         const rots = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+
+        const planes = [];
         for (let i = 0; i < 4; i++) {
             const mesh = new THREE.Mesh(g, m);
             mesh.position.copy(p);
             mesh.rotation.y = rots[i];
             mesh.scale.set(0.95, 0.95, 0.95);
+
+            // Visual: crops receive/cast subtle shadows
+            mesh.castShadow = true;
+            mesh.receiveShadow = false;
+
             this.s.add(mesh);
             this.mesh.set(base + i, mesh);
+            planes.push(mesh);
         }
+
+        // Visual: track for wind sway
+        this.cropPlanes.set(base, {
+            planes,
+            center: p.clone(),
+            seed: (x * 37.1 + z * 91.7 + (type === "wheat" ? 11.3 : 23.7)) * 0.1
+        });
     }
 
     killCrop(x, z) {
@@ -402,6 +525,7 @@ class Vox {
             const kk = base + i;
             if (this.mesh.has(kk)) { this.s.remove(this.mesh.get(kk)); this.mesh.delete(kk); }
         }
+        this.cropPlanes.delete(base);
     }
 
     async breakCrop(x, z) {
@@ -551,6 +675,8 @@ class Vox {
         const s = new THREE.Sprite(mat);
         s.scale.set(0.6, 0.6, 0.6);
         s.position.copy(d.p);
+
+        // Visual: sprite shadows off (keeps it clean)
         this.s.add(s);
         d.m = s;
     }
@@ -625,6 +751,48 @@ class Vox {
             if (d.t > d.life) {
                 this.s.remove(d.m);
                 this.parts.splice(i, 1);
+            }
+        }
+    }
+
+    // -----------------------------
+    // Visual-only tick: crop wind + water flow
+    // -----------------------------
+    visualTick() {
+        const t = now();
+
+        // Crop “wind sway”
+        for (const [, d] of this.cropPlanes) {
+            const w = 0.06 + 0.015 * Math.sin(t * 0.7 + d.seed);
+            const sway = Math.sin(t * (1.4 + 0.25 * Math.sin(d.seed)) + d.seed) * w;
+            const sway2 = Math.cos(t * 1.15 + d.seed * 1.7) * (w * 0.65);
+
+            for (let i = 0; i < d.planes.length; i++) {
+                const m = d.planes[i];
+                // keep anchored at base, lean a bit
+                m.position.copy(d.center);
+                m.rotation.z = 0;
+                m.rotation.x = 0;
+
+                // tiny “stem” lean
+                m.rotation.x = (i % 2 === 0 ? sway : -sway) * 0.35;
+                m.rotation.z = (i % 2 === 0 ? sway2 : -sway2) * 0.35;
+
+                // slight vertical flutter
+                m.position.y = d.center.y + 0.02 * Math.sin(t * 2.2 + d.seed + i);
+            }
+        }
+
+        // Water texture flow (gentle)
+        // (only affects materials created with water hint)
+        const flowU = (t * 0.015) % 1;
+        const flowV = (t * 0.010) % 1;
+        for (const k of this.water) {
+            const m = this.mesh.get(k);
+            if (!m) continue;
+            const mat = m.material;
+            if (mat && mat.map) {
+                mat.map.offset.set(flowU, flowV);
             }
         }
     }
@@ -834,6 +1002,7 @@ class Hologram {
         g.fillText("Infinite Water", 128, 32);
 
         const tx = new THREE.CanvasTexture(c);
+        tx.colorSpace = THREE.SRGBColorSpace;
         tx.magFilter = THREE.NearestFilter;
         tx.minFilter = THREE.NearestFilter;
         tx.generateMipmaps = false;
@@ -862,20 +1031,49 @@ class Game {
         this.root = root;
 
         // --- three ---
-        this.ren = new THREE.WebGLRenderer({ canvas: this.root.el.c, antialias: false });
+        this.ren = new THREE.WebGLRenderer({ canvas: this.root.el.c, antialias: true });
         this.ren.setPixelRatio(Math.min(devicePixelRatio, 2));
         this.ren.setSize(innerWidth, innerHeight, false);
+
+        // Visual: nicer output
+        this.ren.outputColorSpace = THREE.SRGBColorSpace;
+        this.ren.toneMapping = THREE.ACESFilmicToneMapping;
+        this.ren.toneMappingExposure = 1.08;
+
+        // Visual: shadows
+        this.ren.shadowMap.enabled = true;
+        this.ren.shadowMap.type = THREE.PCFSoftShadowMap;
+
         this.ren.setClearColor(0x69b7ff, 1);
 
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.Fog(0x69b7ff, 18, 55);
+
+        // Visual: atmospheric fog a bit smoother
+        this.scene.fog = new THREE.Fog(0x69b7ff, 22, 62);
 
         this.cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 200);
 
-        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-        sun.position.set(2, 8, 3);
-        this.scene.add(sun);
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+        // --- lighting (visual only) ---
+        this.sun = new THREE.DirectionalLight(0xffffff, 1.05);
+        this.sun.position.set(10, 18, 8);
+        this.sun.castShadow = true;
+        this.sun.shadow.mapSize.set(1024, 1024);
+        this.sun.shadow.camera.near = 1;
+        this.sun.shadow.camera.far = 60;
+        this.sun.shadow.camera.left = -18;
+        this.sun.shadow.camera.right = 18;
+        this.sun.shadow.camera.top = 18;
+        this.sun.shadow.camera.bottom = -18;
+        this.sun.shadow.bias = -0.00035;
+        this.scene.add(this.sun);
+
+        this.hemi = new THREE.HemisphereLight(0xcfefff, 0x3b3f4a, 0.55);
+        this.scene.add(this.hemi);
+
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.20));
+
+        // --- sky (visual only) ---
+        this.sky = new Sky(this.scene);
 
         // --- world ---
         this.tex = new Tex();
@@ -1443,6 +1641,11 @@ class Game {
         await this.vox.hydrateTick();
         await this.vox.growTick();
         await this.vox.itemTick(dt, this.pl.p, this.bag);
+
+        // Visual-only updates
+        this.vox.visualTick();
+        this.sky.tick();
+
         this.vox.partsTick(dt, this.cam);
 
         this.holo.tick(this.cam);
@@ -1460,6 +1663,8 @@ class Game {
     async start() {
         this.ui.build();
         this.installEvents();
+
+        this.sky.init();
 
         await this.crack.init();
         await this.vox.init();
