@@ -550,20 +550,10 @@ class Vox {
         }
 
         if (st >= max) {
-            for (let i = 0; i < 3; i++) {
-                this.spawnOrb(
-                    new THREE.Vector3(x + 0.5, y + 1.6, z + 0.5),
-                    0x33ff33
-                );
-            }
-            for (let i = 0; i < 2; i++) {
-                this.spawnOrb(
-                    new THREE.Vector3(x + 0.6, y + 1.6, z + 0.5),
-                    0xffd800
-                );
-            }
-        }
-        else {
+            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), rnd(c.drop.min, c.drop.max));
+            const b = rnd(c.bonus.min, c.bonus.max);
+            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), b);
+        } else {
             this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
         }
         this.partsBurst(x, y, z);
@@ -680,21 +670,16 @@ class Vox {
 
     async itemMesh(d) {
         if (d.m) return;
-
         const tx = await this.t.get(items[d.k].img);
+        const mat = new THREE.SpriteMaterial({ map: tx, transparent: true, depthWrite: false });
+        const s = new THREE.Sprite(mat);
+        s.scale.set(0.6, 0.6, 0.6);
+        s.position.copy(d.p);
 
-        const g = new THREE.BoxGeometry(0.25, 0.25, 0.25);
-        const m = new THREE.MeshStandardMaterial({ map: tx });
-
-        const cube = new THREE.Mesh(g, m);
-        cube.position.copy(d.p);
-        cube.castShadow = true;
-        cube.receiveShadow = false;
-
-        this.s.add(cube);
-        d.m = cube;
+        // Visual: sprite shadows off (keeps it clean)
+        this.s.add(s);
+        d.m = s;
     }
-
 
     // Items rest on correct surface height (no dropping to y-1).
     async itemTick(dt, plPos, bag) {
@@ -722,10 +707,6 @@ class Vox {
             d.m.position.set(d.p.x, d.p.y + bob, d.p.z);
 
             const pp = new THREE.Vector3(plPos.x, plPos.y - 1.2, plPos.z);
-
-            const dir = pp.clone().sub(d.p).normalize();
-            d.v.addScaledVector(dir, dt * 14);
-
             if (d2(pp, d.p) < conf.pick * conf.pick) {
                 const left = bag.add(d.k, d.c);
                 if (left <= 0) {
@@ -771,25 +752,6 @@ class Vox {
                 this.s.remove(d.m);
                 this.parts.splice(i, 1);
             }
-            if (d.orb) {
-                d.orb.userData.t += dt;
-                const s = 1 + Math.sin(now() * 6) * 0.15;
-                d.orb.scale.setScalar(s);
-
-                const dir = cam.position.clone().sub(d.orb.position).normalize();
-                d.orb.position.addScaledVector(dir, dt * 4);
-
-                if (d.orb.position.distanceTo(cam.position) < 1) {
-                    if (d.orb.material.color.getHex() === 0x33ff33) {
-                        game.addXP(3);
-                    } else {
-                        game.coins++;
-                        coins.textContent = game.coins;
-                    }
-                    this.scene.remove(d.orb);
-                    this.parts.splice(i, 1);
-                }
-            }
         }
     }
 
@@ -834,17 +796,6 @@ class Vox {
             }
         }
     }
-
-    spawnOrb(pos, color) {
-        const g = new THREE.BoxGeometry(0.18, 0.18, 0.18);
-        const m = new THREE.MeshBasicMaterial({ color });
-        const o = new THREE.Mesh(g, m);
-        o.position.copy(pos);
-        o.userData = { t: 0 };
-        this.s.add(o);
-        this.parts.push({ orb: o });
-    }
-
 }
 
 // -----------------------------
@@ -1079,11 +1030,6 @@ class Game {
     constructor(root) {
         this.root = root;
 
-        // --- exp lvls coins ---
-        this.xp = 0;
-        this.level = 1;
-        this.coins = 0;
-
         // --- three ---
         this.ren = new THREE.WebGLRenderer({ canvas: this.root.el.c, antialias: true });
         this.ren.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -1173,21 +1119,6 @@ class Game {
 
         // bind
         this.loop = this.loop.bind(this);
-    }
-
-    addXP(v) {
-        this.xp += v;
-        const need = this.level * 10;
-
-        if (this.xp >= need) {
-            this.xp -= need;
-            this.level++;
-        }
-
-        document.getElementById("xpfill").style.width =
-            `${(this.xp / need) * 100}%`;
-
-        document.getElementById("lvl").textContent = this.level;
     }
 
     seedInitialHotbar() {
