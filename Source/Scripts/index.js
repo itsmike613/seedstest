@@ -382,16 +382,16 @@ class Vox {
         const max = c.stages.length - 1;
 
         if (popped) {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), 1);
             return;
         }
 
         if (st >= max) {
-            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), rnd(c.drop.min, c.drop.max));
+            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), rnd(c.drop.min, c.drop.max));
             const b = rnd(c.bonus.min, c.bonus.max);
-            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), b);
+            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), b);
         } else {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), 1);
         }
         this.partsBurst(x, y, z);
     }
@@ -919,13 +919,21 @@ function collide(dt) {
     // --- vertical first (CRITICAL) ---
     pl.p.y += pl.v.y * dt;
 
-    const bx0 = Math.floor(pl.p.x);
-    const bz0 = Math.floor(pl.p.z);
-    const top0 = tileTop(bx0, bz0);
+    const fx0 = Math.floor(pl.p.x - R);
+    const fx1 = Math.floor(pl.p.x + R);
+    const fz0 = Math.floor(pl.p.z - R);
+    const fz1 = Math.floor(pl.p.z + R);
+
+    let floor = -Infinity;
+    for (let x = fx0; x <= fx1; x++) {
+        for (let z = fz0; z <= fz1; z++) {
+            floor = Math.max(floor, tileTop(x, z));
+        }
+    }
 
     const feet = pl.p.y - HEIGHT;
-    if (feet < top0) {
-        pl.p.y += (top0 - feet);
+    if (feet < floor) {
+        pl.p.y += (floor - feet);
         pl.v.y = 0;
         pl.on = true;
     } else {
