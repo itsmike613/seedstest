@@ -1034,12 +1034,12 @@ async function crackInit() {
     // Put your images here:
     // ./Source/Assets/UI/crack1.png ... crack6.png
     const urls = [
-        "./Source/Assets/UI/crack1.png",
-        "./Source/Assets/UI/crack2.png",
-        "./Source/Assets/UI/crack3.png",
-        "./Source/Assets/UI/crack4.png",
-        "./Source/Assets/UI/crack5.png",
-        "./Source/Assets/UI/crack6.png",
+        "./Source/Assets/UI/Breaking/crack1.png",
+        "./Source/Assets/UI/Breaking/crack2.png",
+        "./Source/Assets/UI/Breaking/crack3.png",
+        "./Source/Assets/UI/Breaking/crack4.png",
+        "./Source/Assets/UI/Breaking/crack5.png",
+        "./Source/Assets/UI/Breaking/crack6.png",
     ];
     for (const u of urls) crack.tx.push(await tex.get(u));
 
