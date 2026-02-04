@@ -4,10 +4,6 @@ const W = 32, H = 32;
 const Y0 = 0, Y1 = 1;
 const INF = { x: 0, y: 1, z: 0 };
 
-// crack sprites: crack1.png ... crack6.png
-const CRACKBASE = "./Source/Assets/UI/Cracks/crack";
-const CRACKCOUNT = 6;
-
 const conf = {
     reach: 6,
     grav: 24,
@@ -21,6 +17,7 @@ const conf = {
     hyd: 5,
     hydelay: 1.2,
     unhydelay: 2.5,
+    regrow: 4.5,
     grow: 2.2
 };
 
@@ -46,7 +43,6 @@ function now() { return performance.now() * 0.001; }
 function d2(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
 function key(x, y, z) { return `${x}|${y}|${z}`; }
 function parse(k) { const [x, y, z] = k.split("|").map(Number); return { x, y, z }; }
-function rnd(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
 
 const items = {
     hoe_wood: { k: "hoe_wood", n: "Wooden Hoe", t: "tool", stack: 1, img: "./Source/Assets/Tools/Hoes/wood.png" },
@@ -187,7 +183,6 @@ class Tex {
             this.l.load(url, (tx) => res(tx), undefined, () => res(null));
         });
         if (!t) {
-            // placeholder magenta if missing
             const c = document.createElement("canvas");
             c.width = c.height = 32;
             const g = c.getContext("2d");
@@ -216,11 +211,12 @@ class Vox {
 
         this.g = new THREE.BoxGeometry(1, 1, 1);
         this.mats = new Map();
-        this.mesh = new Map(); // blocks + crop parts
-        this.map = new Map();  // blocks only: key -> id
+        this.mesh = new Map();
+        this.map = new Map();
 
-        this.tilled = new Map(); // key -> {wet,ts}
-        this.crop = new Map();   // key -> {type,st,ts}
+        this.water = new Set();
+        this.tilled = new Map();
+        this.crop = new Map();
 
         this.items = [];
         this.parts = [];
@@ -248,12 +244,16 @@ class Vox {
             this.mesh.delete(k);
         }
 
+        if (prev === "water") this.water.delete(k);
+        if (id === "water") this.water.add(k);
+
         if (!id) {
             this.map.delete(k);
             return;
         }
 
         this.map.set(k, id);
+
         const b = blocks[id];
         const m = await this.mat(b.img);
         const mesh = new THREE.Mesh(this.g, m);
@@ -300,64 +300,6 @@ class Vox {
         return true;
     }
 
-    // 4 planes like a box/billboard, bottom anchored at top of soil
-    async cropMesh(x, y, z, type, st) {
-        const base = key(x, y, z) + "|crop";
-        // remove old
-        for (let i = 0; i < 4; i++) {
-            const k = base + "|" + i;
-            if (this.mesh.has(k)) {
-                this.s.remove(this.mesh.get(k));
-                this.mesh.delete(k);
-            }
-        }
-
-        const list = crops[type].stages;
-        const url = list[clamp(st, 0, list.length - 1)];
-        const tx = await this.t.get(url);
-        const m = new THREE.MeshLambertMaterial({
-            map: tx,
-            transparent: true,
-            depthWrite: false,
-            alphaTest: 0.01 // helps thin early sprites show correctly
-        });
-
-        // Plane with bottom at y=0 (instead of centered)
-        const g = new THREE.PlaneGeometry(1, 1);
-        g.translate(0, 0.5, 0);
-
-        const center = new THREE.Vector3(x + 0.5, y + 1.0, z + 0.5);
-
-        // 4 sides: 0, 90, 180, 270 degrees
-        for (let i = 0; i < 4; i++) {
-            const a = (Math.PI / 2) * i;
-            const mesh = new THREE.Mesh(g, m);
-            mesh.position.copy(center);
-            mesh.rotation.y = a;
-
-            // tiny inward offset to avoid z-fighting with itself
-            const off = 0.001;
-            mesh.position.x += Math.sin(a) * off;
-            mesh.position.z += Math.cos(a) * off;
-
-            this.s.add(mesh);
-            this.mesh.set(base + "|" + i, mesh);
-        }
-    }
-
-    killCrop(x, z) {
-        const k = key(x, Y1, z);
-        this.crop.delete(k);
-        const base = k + "|crop";
-        for (let i = 0; i < 4; i++) {
-            const mkey = base + "|" + i;
-            if (this.mesh.has(mkey)) {
-                this.s.remove(this.mesh.get(mkey));
-                this.mesh.delete(mkey);
-            }
-        }
-    }
-
     async plant(x, z, type) {
         const id = this.get(x, Y1, z);
         if (id !== "tilled_dry" && id !== "tilled_wet") return false;
@@ -366,6 +308,54 @@ class Vox {
         this.crop.set(k, { type, st: 0, ts: now() });
         await this.cropMesh(x, Y1, z, type, 0);
         return true;
+    }
+
+    // FIX: 4 planes "box" (Minecraft-style), and positioned so texture sits on top of soil
+    async cropMesh(x, y, z, type, st) {
+        const base = key(x, y, z) + "|crop";
+        // remove old
+        for (let i = 0; i < 4; i++) {
+            const kk = base + i;
+            if (this.mesh.has(kk)) { this.s.remove(this.mesh.get(kk)); this.mesh.delete(kk); }
+        }
+
+        const list = crops[type].stages;
+        const url = list[clamp(st, 0, list.length - 1)];
+        const tx = await this.t.get(url);
+
+        const m = new THREE.MeshLambertMaterial({
+            map: tx,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+
+        const g = new THREE.PlaneGeometry(1, 1);
+
+        // top of soil block at y+1 (since soil block y=1 => top at 2.0)
+        // Put plane center at 2.5 so bottom edge is at 2.0 (sits on ground).
+        const p = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
+
+        // 4-sided "box" (north/east/south/west)
+        const rots = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+        for (let i = 0; i < 4; i++) {
+            const mesh = new THREE.Mesh(g, m);
+            mesh.position.copy(p);
+            mesh.rotation.y = rots[i];
+            mesh.scale.set(0.95, 0.95, 0.95);
+            this.s.add(mesh);
+            this.mesh.set(base + i, mesh);
+        }
+    }
+
+    killCrop(x, z) {
+        const k = key(x, Y1, z);
+        this.crop.delete(k);
+        const base = k + "|crop";
+        for (let i = 0; i < 4; i++) {
+            const kk = base + i;
+            if (this.mesh.has(kk)) { this.s.remove(this.mesh.get(kk)); this.mesh.delete(kk); }
+        }
     }
 
     async breakCrop(x, z) {
@@ -415,7 +405,6 @@ class Vox {
                     v.wet = false; v.ts = t;
                     await this.set(p.x, p.y, p.z, "tilled_dry");
 
-                    // pop crop, then soil becomes dirt, then grass later (your original behavior)
                     const ck = key(p.x, p.y, p.z);
                     if (this.crop.has(ck)) {
                         const c = this.crop.get(ck);
@@ -424,12 +413,7 @@ class Vox {
 
                         await this.set(p.x, p.y, p.z, "dirt");
                         this.tilled.delete(ck);
-
-                        setTimeout(async () => {
-                            if (this.get(p.x, p.y, p.z) === "dirt") {
-                                await this.set(p.x, p.y, p.z, "grass");
-                            }
-                        }, 4500);
+                        this.regrowLater(p.x, p.y, p.z);
                     }
                 }
             }
@@ -455,33 +439,32 @@ class Vox {
         }
     }
 
-    // IMPORTANT FIX: breaking grass/dirt/farmland now becomes AIR (null) at Y=1
+    regrowLater(x, y, z) {
+        setTimeout(async () => {
+            if (this.get(x, y, z) === "dirt") await this.set(x, y, z, "grass");
+        }, conf.regrow * 1000);
+    }
+
+    // FIX: breaking dirt/grass/tilled removes the block to AIR (null) instead of turning to dirt
     async breakBlock(x, y, z) {
-        // protect infinite source
         if (x === INF.x && y === INF.y && z === INF.z) return null;
 
         const id = this.get(x, y, z);
         if (!id) return null;
         if (!blocks[id].breakable) return null;
 
-        // instant crop break
         if (y === Y1) {
             await this.breakCrop(x, z);
-
             const ck = key(x, y, z);
-            if (id === "tilled_dry" || id === "tilled_wet") {
-                this.tilled.delete(ck);
-            }
+            if (id === "tilled_dry" || id === "tilled_wet") this.tilled.delete(ck);
         }
 
-        // if it was water (non-infinite): remove to AIR
         if (id === "water") {
             await this.set(x, y, z, null);
             this.partsBurst(x, y, z);
             return "water";
         }
 
-        // grass/dirt/tilled: remove to AIR and drop dirt
         await this.set(x, y, z, null);
         this.spawnItem("dirt", new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
         this.partsBurst(x, y, z);
@@ -492,7 +475,6 @@ class Vox {
         if (!this.inPad(x, z)) return false;
         if (y !== Y1) return false;
         if (x === INF.x && y === INF.y && z === INF.z) return false;
-
         await this.set(x, y, z, id);
         return true;
     }
@@ -534,12 +516,8 @@ class Vox {
             d.v.y -= 18 * dt;
             d.p.addScaledVector(d.v, dt);
 
-            // ground: if y1 block exists, stand on it; else stand on y0 top (y=1)
-            const gx = Math.floor(d.p.x);
-            const gz = Math.floor(d.p.z);
-            const top = this.surfaceTop(gx, gz);
-            const fy = top + 0.02;
-
+            // floor at y=0 top if y1 removed, or y1 top if present; just clamp to y=1.02 visually
+            const fy = Y0 + 1.02;
             if (d.p.y < fy) {
                 d.p.y = fy;
                 d.v.y *= -0.18;
@@ -561,18 +539,6 @@ class Vox {
                 }
             }
         }
-    }
-
-    surfaceTop(x, z) {
-        // returns the top Y of the highest "surface" at this column
-        // y1 exists:
-        const a = this.get(x, Y1, z);
-        if (a) {
-            if (a === "water") return (Y1 + 1) - 0.15;
-            return (Y1 + 1);
-        }
-        // else unbreakable at y0 (always exists)
-        return (Y0 + 1);
     }
 
     partsBurst(x, y, z) {
@@ -612,6 +578,8 @@ class Vox {
     }
 }
 
+function rnd(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
+
 // --- three ---
 const ren = new THREE.WebGLRenderer({ canvas: root.el.c, antialias: false });
 ren.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -622,7 +590,6 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x69b7ff, 18, 55);
 
 const cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 200);
-
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 sun.position.set(2, 8, 3);
 scene.add(sun);
@@ -660,9 +627,7 @@ let tab = false;
 
 // mining state
 const mine = { on: false, k: "", p: { x: 0, y: 0, z: 0 }, t: 0, need: 0.8 };
-
-// crack overlay
-const crack = { m: null, tx: [], idx: 0 };
+const crack = { m: null, tx: [] };
 
 const ray = new THREE.Raycaster();
 ray.far = conf.reach;
@@ -676,9 +641,7 @@ function msg(t) {
 
 function prevent(e) {
     if (lock || open) {
-        if (e.code === "Space" || e.code === "Tab" || e.ctrlKey || e.metaKey || e.altKey) {
-            e.preventDefault();
-        }
+        if (e.code === "Space" || e.code === "Tab" || e.ctrlKey || e.metaKey || e.altKey) e.preventDefault();
     }
 }
 
@@ -767,15 +730,11 @@ function slotDown(e) {
     const hot = el.dataset.h === "1";
     const shift = e.shiftKey;
 
-    if (shift) {
-        bag.moveQuick(i, hot);
-        return;
-    }
+    if (shift) { bag.moveQuick(i, hot); return; }
 
     const arr = hot ? bag.hot : bag.inv;
     const cur = arr[i];
 
-    // right-click split / place-one
     if (e.button === 2) {
         if (!bag.carry && cur && items[cur.k].stack > 1 && cur.c > 1) {
             const half = Math.ceil(cur.c / 2);
@@ -802,16 +761,15 @@ function slotDown(e) {
         return;
     }
 
-    // left click pick/place/swap/merge
     if (!bag.carry) {
         if (cur) { arr[i] = null; bag.carry = cur; }
         return;
     }
+
     const left = bag.put(i, hot, bag.carry);
     bag.carry = left;
 }
 
-// --- pointer lock ---
 function setOpen(v) {
     open = v;
     root.el.inv.classList.toggle("hide", !open);
@@ -837,10 +795,7 @@ addEventListener("mousemove", (e) => {
 
 addEventListener("mousedown", async (e) => {
     if (open) return;
-    if (!lock) {
-        root.el.c.requestPointerLock();
-        return;
-    }
+    if (!lock) { root.el.c.requestPointerLock(); return; }
     if (e.button === 0) mine.on = true;
     if (e.button === 2) await use();
 });
@@ -891,7 +846,6 @@ addEventListener("keyup", (e) => {
 
 // --- movement ---
 function facing() {
-    // match camera forward (-Z)
     const cx = -Math.sin(pl.yaw) * Math.cos(pl.pit);
     const cy = Math.sin(pl.pit);
     const cz = -Math.cos(pl.yaw) * Math.cos(pl.pit);
@@ -913,13 +867,13 @@ function damp(v, t, k, dt) {
 function ctrl(dt) {
     const f = facing();
     const up = new THREE.Vector3(0, 1, 0);
-    const r = new THREE.Vector3().crossVectors(f, up).normalize(); // right
+    const r = new THREE.Vector3().crossVectors(f, up).normalize();
 
     let ax = 0, az = 0;
-    if (K["KeyW"]) { ax += f.x; az += f.z; } // forward
-    if (K["KeyS"]) { ax -= f.x; az -= f.z; } // back
-    if (K["KeyA"]) { ax -= r.x; az -= r.z; } // left
-    if (K["KeyD"]) { ax += r.x; az += r.z; } // right
+    if (K["KeyW"]) { ax += f.x; az += f.z; }
+    if (K["KeyS"]) { ax -= f.x; az -= f.z; }
+    if (K["KeyA"]) { ax -= r.x; az -= r.z; }
+    if (K["KeyD"]) { ax += r.x; az += r.z; }
 
     const len = Math.hypot(ax, az);
     if (len > 0) { ax /= len; az /= len; }
@@ -938,23 +892,33 @@ function ctrl(dt) {
     pl.v.y -= conf.grav * dt;
 }
 
+// FIX: if y=1 block was broken to air, stand on y=0 unbreakable top (y=1)
 function collide(dt) {
     pl.p.x += pl.v.x * dt;
     pl.p.y += pl.v.y * dt;
     pl.p.z += pl.v.z * dt;
 
-    // edge barrier
     pl.p.x = clamp(pl.p.x, 0.2, W - 0.2);
     pl.p.z = clamp(pl.p.z, 0.2, H - 0.2);
 
     const bx = Math.floor(pl.p.x);
     const bz = Math.floor(pl.p.z);
 
-    const top = vox.surfaceTop(bx, bz);
+    const topY1 = vox.get(bx, Y1, bz); // may be null (air)
+    const topY0 = vox.get(bx, Y0, bz); // always unbreak
 
-    // camera is head; feet is ~1.62 below
+    // Default ground is y=0 block top => y=1
+    let top = Y0 + 1;
+
+    if (topY1) {
+        // y=1 block exists => stand on its top (y=2), water is shorter
+        top = Y1 + 1;
+        if (topY1 === "water") top -= 0.15;
+    } else if (topY0) {
+        top = Y0 + 1;
+    }
+
     const feet = pl.p.y - 1.62;
-
     if (feet < top) {
         pl.p.y += (top - feet);
         if (pl.v.y < 0) pl.v.y = 0;
@@ -981,6 +945,7 @@ async function hit() {
 
     const n = h.face.normal;
     const place = new THREE.Vector3(x, y, z).add(n);
+
     return {
         x, y, z,
         px: Math.floor(place.x),
@@ -989,7 +954,7 @@ async function hit() {
     };
 }
 
-// --- tools/usage ---
+// --- use ---
 async function use() {
     const s = bag.hot[bag.sel];
     if (!s) return;
@@ -1020,7 +985,6 @@ async function use() {
         return;
     }
 
-    // bucket empty: take water (infinite fills; normal removes)
     if (s.k === "bucket_empty") {
         if (h.x === INF.x && h.y === INF.y && h.z === INF.z) {
             bag.hot[bag.sel] = { k: "bucket_full", c: 1 };
@@ -1036,7 +1000,6 @@ async function use() {
         return;
     }
 
-    // bucket full: place water (Y=1), not on infinite tile, not inside player
     if (s.k === "bucket_full") {
         if (h.py !== Y1) return;
         if (h.px === INF.x && h.py === INF.y && h.pz === INF.z) return;
@@ -1051,7 +1014,6 @@ async function use() {
         return;
     }
 
-    // place dirt at adjacent Y=1
     if (s.k === "dirt") {
         if (h.py !== Y1) return;
         if (h.px === INF.x && h.py === INF.y && h.pz === INF.z) return;
@@ -1067,21 +1029,24 @@ async function use() {
     }
 }
 
-// --- crack overlay sprites (crack1..crack6) ---
+// --- crack overlay: crack1..crack6 ---
 async function crackInit() {
-    for (let i = 1; i <= CRACKCOUNT; i++) {
-        const tx = await tex.get(`${CRACKBASE}${i}.png`);
-        crack.tx.push(tx);
-    }
-    const mat = new THREE.SpriteMaterial({
-        map: crack.tx[0],
-        transparent: true,
-        depthWrite: false,
-        opacity: 0.95
-    });
+    // Put your images here:
+    // ./Source/Assets/UI/crack1.png ... crack6.png
+    const urls = [
+        "./Source/Assets/UI/crack1.png",
+        "./Source/Assets/UI/crack2.png",
+        "./Source/Assets/UI/crack3.png",
+        "./Source/Assets/UI/crack4.png",
+        "./Source/Assets/UI/crack5.png",
+        "./Source/Assets/UI/crack6.png",
+    ];
+    for (const u of urls) crack.tx.push(await tex.get(u));
+
+    const mat = new THREE.SpriteMaterial({ map: crack.tx[0], transparent: true, depthWrite: false, opacity: 0.95 });
     const s = new THREE.Sprite(mat);
     s.visible = false;
-    s.scale.set(1.06, 1.06, 1.06);
+    s.scale.set(1.05, 1.05, 1.05);
     scene.add(s);
     crack.m = s;
 }
@@ -1090,24 +1055,17 @@ function crackShow(x, y, z, stage) {
     if (!crack.m) return;
     crack.m.visible = true;
     crack.m.position.set(x + 0.5, y + 0.5, z + 0.5);
-    crack.m.material.map = crack.tx[clamp(stage, 0, CRACKCOUNT - 1)];
+    crack.m.material.map = crack.tx[clamp(stage, 0, 5)];
     crack.m.material.needsUpdate = true;
 }
-
-function crackHide() {
-    if (crack.m) crack.m.visible = false;
-}
+function crackHide() { if (crack.m) crack.m.visible = false; }
 
 // --- mining ---
 function hardness(id) {
-    // seconds to break with fist
-    if (id === "grass") return 0.95;
-    if (id === "dirt") return 0.95;
-    if (id === "tilled_dry" || id === "tilled_wet") return 0.95;
-    if (id === "water") return 0.20;
-    return 1.0;
+    if (id === "grass" || id === "dirt" || id === "tilled_dry" || id === "tilled_wet") return 0.85;
+    if (id === "water") return 0.25;
+    return 0.9;
 }
-
 function speedFor(id) {
     const s = bag.hot[bag.sel];
     const held = s ? s.k : "";
@@ -1123,12 +1081,12 @@ async function mineTick(dt) {
     const h = await hit();
     if (!h) { mine.t = 0; crackHide(); return; }
 
-    // crops are instant
     if (h.y === Y1) {
         const ck = key(h.x, Y1, h.z);
         if (vox.crop.has(ck)) {
             await vox.breakCrop(h.x, h.z);
-            mine.t = 0; crackHide();
+            mine.t = 0;
+            crackHide();
             return;
         }
     }
@@ -1150,7 +1108,7 @@ async function mineTick(dt) {
     mine.t += dt;
 
     const prog = clamp(mine.t / mine.need, 0, 1);
-    const stage = Math.min(CRACKCOUNT - 1, Math.floor(prog * CRACKCOUNT));
+    const stage = Math.min(5, Math.floor(prog * 6));
     crackShow(h.x, h.y, h.z, stage);
 
     if (mine.t >= mine.need) {
@@ -1168,7 +1126,7 @@ function round(g, x, y, w, h, r) {
     g.moveTo(x + r, y);
     g.arcTo(x + w, y, x + w, y + h, r);
     g.arcTo(x + w, y + h, x, y + h, r);
-    g.arcTo(x, y + h, x, y, x, r);
+    g.arcTo(x, y + h, x, y, r);
     g.arcTo(x, y, x + w, y, r);
     g.closePath();
 }
@@ -1212,13 +1170,9 @@ function holoTick() {
 
 // --- TAB ---
 let fpa = 0, fpf = 0, fps = 0;
-
 function tabTick(dt) {
     fpa += dt; fpf++;
-    if (fpa >= 0.25) {
-        fps = Math.round(fpf / fpa);
-        fpa = 0; fpf = 0;
-    }
+    if (fpa >= 0.25) { fps = Math.round(fpf / fpa); fpa = 0; fpf = 0; }
     if (tab) {
         root.el.fps.textContent = `FPS: ${fps}`;
         root.el.pos.textContent = `XYZ: ${pl.p.x.toFixed(2)} ${pl.p.y.toFixed(2)} ${pl.p.z.toFixed(2)}`;
@@ -1254,35 +1208,22 @@ async function loop() {
     tabTick(dt);
 
     uiDraw();
-
     ren.render(scene, cam);
+
     requestAnimationFrame(loop);
 }
 
-// --- ray setup + start ---
-function camSync() {
-    cam.position.copy(pl.p);
-    cam.rotation.order = "YXZ";
-    cam.rotation.y = pl.yaw;
-    cam.rotation.x = pl.pit;
-}
-
+// --- start ---
 async function start() {
     uiBuild();
     await crackInit();
     await vox.init();
     await holoInit();
 
-    // spawn next to infinite water
     pl.p.set(1.35, 2.65, 1.35);
 
     msg("Click to play");
     requestAnimationFrame(loop);
 }
-
-// pointer lock state
-document.addEventListener("pointerlockchange", () => {
-    lock = (document.pointerLockElement === root.el.c);
-});
 
 start();
