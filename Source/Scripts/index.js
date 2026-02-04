@@ -528,7 +528,7 @@ class Vox {
             d.p.addScaledVector(d.v, dt);
 
             // floor at y=0 top if y1 removed, or y1 top if present; just clamp to y=1.02 visually
-            const fy = Y0 + 1.02;
+            const fy = Y1 - 1 + 0.02;
             if (d.p.y < fy) {
                 d.p.y = fy;
                 d.v.y *= -0.18;
@@ -904,34 +904,45 @@ function ctrl(dt) {
 }
 
 function collide(dt) {
-    const R = 0.25;        // player radius
-    const HEIGHT = 1.62;   // eye-to-feet
+    const R = 0.25;
+    const HEIGHT = 1.62;
     const EPS = 0.001;
 
     const tileTop = (bx, bz) => {
         const t = vox.get(bx, Y1, bz);
-        if (!t) return Y0 + 1;        // air above base
+        if (!t) return Y0 + 1;
         if (t === "water") return Y1 + 0.85;
         if (t === "path") return Y1 + 0.90;
         return Y1 + 1;
     };
 
-    const solidAt = (x, z, feetY) => {
-        const bx = Math.floor(x);
-        const bz = Math.floor(z);
-        if (bx < 0 || bz < 0 || bx >= W || bz >= H) return true;
-        return feetY < tileTop(bx, bz) - EPS;
-    };
+    // --- vertical first (CRITICAL) ---
+    pl.p.y += pl.v.y * dt;
+
+    const bx0 = Math.floor(pl.p.x);
+    const bz0 = Math.floor(pl.p.z);
+    const top0 = tileTop(bx0, bz0);
+
+    const feet = pl.p.y - HEIGHT;
+    if (feet < top0) {
+        pl.p.y += (top0 - feet);
+        pl.v.y = 0;
+        pl.on = true;
+    } else {
+        pl.on = false;
+    }
 
     // --- horizontal X ---
     let nx = pl.p.x + pl.v.x * dt;
     nx = clamp(nx, R, W - R);
 
     const feetY = pl.p.y - HEIGHT;
-    if (
-        solidAt(nx - R, pl.p.z, feetY) ||
-        solidAt(nx + R, pl.p.z, feetY)
-    ) {
+
+    const hitX =
+        feetY < tileTop(Math.floor(nx - R), bz0) - EPS ||
+        feetY < tileTop(Math.floor(nx + R), bz0) - EPS;
+
+    if (hitX) {
         nx = pl.p.x;
         pl.v.x = 0;
     }
@@ -940,36 +951,19 @@ function collide(dt) {
     let nz = pl.p.z + pl.v.z * dt;
     nz = clamp(nz, R, H - R);
 
-    if (
-        solidAt(nx, nz - R, feetY) ||
-        solidAt(nx, nz + R, feetY)
-    ) {
+    const hitZ =
+        feetY < tileTop(bx0, Math.floor(nz - R)) - EPS ||
+        feetY < tileTop(bx0, Math.floor(nz + R)) - EPS;
+
+    if (hitZ) {
         nz = pl.p.z;
         pl.v.z = 0;
     }
 
     pl.p.x = nx;
     pl.p.z = nz;
-
-    // --- vertical ---
-    pl.p.y += pl.v.y * dt;
-
-    const bx = Math.floor(pl.p.x);
-    const bz = Math.floor(pl.p.z);
-    const top = tileTop(bx, bz);
-
-    const feet = pl.p.y - HEIGHT;
-    if (feet < top) {
-        pl.p.y += (top - feet);
-        pl.v.y = 0;
-        pl.on = true;
-    } else {
-        pl.on = false;
-    }
-
-    // absolute safety clamp
-    pl.p.y = Math.max(pl.p.y, top + HEIGHT);
 }
+
 
 // --- raycast ---
 async function hit() {
