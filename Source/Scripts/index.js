@@ -627,7 +627,7 @@ let tab = false;
 
 // mining state
 const mine = { on: false, k: "", p: { x: 0, y: 0, z: 0 }, t: 0, need: 0.8 };
-const crack = { m: null, tx: [] };
+const crack = { m: [], tx: [] };
 
 const ray = new THREE.Raycaster();
 ray.far = conf.reach;
@@ -1030,9 +1030,8 @@ async function use() {
 }
 
 // --- crack overlay: crack1..crack6 ---
+// FIX: show crack texture on ALL sides of the block being broken, cycling crack1..crack6
 async function crackInit() {
-    // Put your images here:
-    // ./Source/Assets/UI/crack1.png ... crack6.png
     const urls = [
         "./Source/Assets/UI/Breaking/crack1.png",
         "./Source/Assets/UI/Breaking/crack2.png",
@@ -1043,22 +1042,72 @@ async function crackInit() {
     ];
     for (const u of urls) crack.tx.push(await tex.get(u));
 
-    const mat = new THREE.SpriteMaterial({ map: crack.tx[0], transparent: true, depthWrite: false, opacity: 0.95 });
-    const s = new THREE.Sprite(mat);
-    s.visible = false;
-    s.scale.set(1.05, 1.05, 1.05);
-    scene.add(s);
-    crack.m = s;
+    const mat = new THREE.MeshBasicMaterial({
+        map: crack.tx[0],
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2
+    });
+
+    const g = new THREE.PlaneGeometry(1.02, 1.02);
+
+    const faces = [
+        { // +Z
+            pos: new THREE.Vector3(0.5, 0.5, 1.001),
+            rot: new THREE.Euler(0, 0, 0)
+        },
+        { // -Z
+            pos: new THREE.Vector3(0.5, 0.5, -0.001),
+            rot: new THREE.Euler(0, Math.PI, 0)
+        },
+        { // +X
+            pos: new THREE.Vector3(1.001, 0.5, 0.5),
+            rot: new THREE.Euler(0, -Math.PI * 0.5, 0)
+        },
+        { // -X
+            pos: new THREE.Vector3(-0.001, 0.5, 0.5),
+            rot: new THREE.Euler(0, Math.PI * 0.5, 0)
+        },
+        { // +Y (top)
+            pos: new THREE.Vector3(0.5, 1.001, 0.5),
+            rot: new THREE.Euler(-Math.PI * 0.5, 0, 0)
+        },
+        { // -Y (bottom)
+            pos: new THREE.Vector3(0.5, -0.001, 0.5),
+            rot: new THREE.Euler(Math.PI * 0.5, 0, 0)
+        }
+    ];
+
+    crack.m = [];
+    for (let i = 0; i < faces.length; i++) {
+        const m = new THREE.Mesh(g, mat.clone());
+        m.visible = false;
+        m.renderOrder = 999;
+        scene.add(m);
+        crack.m.push({ mesh: m, localPos: faces[i].pos, localRot: faces[i].rot });
+    }
 }
 
 function crackShow(x, y, z, stage) {
-    if (!crack.m) return;
-    crack.m.visible = true;
-    crack.m.position.set(x + 0.5, y + 0.5, z + 0.5);
-    crack.m.material.map = crack.tx[clamp(stage, 0, 5)];
-    crack.m.material.needsUpdate = true;
+    if (!crack.m || crack.m.length === 0) return;
+
+    const tx = crack.tx[clamp(stage, 0, 5)];
+    for (const f of crack.m) {
+        f.mesh.visible = true;
+        f.mesh.position.set(x, y, z).add(f.localPos);
+        f.mesh.rotation.copy(f.localRot);
+        f.mesh.material.map = tx;
+        f.mesh.material.needsUpdate = true;
+    }
 }
-function crackHide() { if (crack.m) crack.m.visible = false; }
+function crackHide() {
+    if (!crack.m || crack.m.length === 0) return;
+    for (const f of crack.m) f.mesh.visible = false;
+}
 
 // --- mining ---
 function hardness(id) {
