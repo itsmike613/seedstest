@@ -43,6 +43,7 @@ function now() { return performance.now() * 0.001; }
 function d2(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
 function key(x, y, z) { return `${x}|${y}|${z}`; }
 function parse(k) { const [x, y, z] = k.split("|").map(Number); return { x, y, z }; }
+function rnd(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
 
 const items = {
     hoe_wood: { k: "hoe_wood", n: "Wooden Hoe", t: "tool", stack: 1, img: "./Source/Assets/Tools/Hoes/wood.png" },
@@ -68,7 +69,7 @@ const blocks = {
     tilled_dry: { k: "tilled_dry", img: "./Source/Assets/Blocks/unhydrated.png", breakable: true },
     tilled_wet: { k: "tilled_wet", img: "./Source/Assets/Blocks/hydrated.png", breakable: true },
     water: { k: "water", img: "./Source/Assets/Blocks/water.png", breakable: true },
-    path: { k: "path", img: "./Source/Assets/Blocks/path.png", breakable: true } // NEW
+    path: { k: "path", img: "./Source/Assets/Blocks/path.png", breakable: true }
 };
 
 const crops = {
@@ -225,6 +226,17 @@ class Vox {
 
     inPad(x, z) { return x >= 0 && z >= 0 && x < W && z < H; }
 
+    // Top surface height for the column at (x,z).
+    // If there is NO block at Y1 => you stand on Y0 block top (1.0).
+    // If there IS a block at Y1 => top is 2.0 (or lower for water/path).
+    topAt(x, z) {
+        const t = this.get(x, Y1, z);
+        if (!t) return Y0 + 1;
+        if (t === "water") return Y1 + 0.85;
+        if (t === "path") return Y1 + 0.90;
+        return Y1 + 1;
+    }
+
     async mat(url) {
         if (this.mats.has(url)) return this.mats.get(url);
         const tx = await this.t.get(url);
@@ -265,7 +277,6 @@ class Vox {
             mesh.position.y -= 0.075;
         }
 
-        // NEW: path is slightly shorter like water (but different)
         if (id === "path") {
             mesh.scale.y = 0.90;
             mesh.position.y -= 0.05;
@@ -317,10 +328,8 @@ class Vox {
         return true;
     }
 
-    // FIX: 4 planes "box" (Minecraft-style), and positioned so texture sits on top of soil
     async cropMesh(x, y, z, type, st) {
         const base = key(x, y, z) + "|crop";
-        // remove old
         for (let i = 0; i < 4; i++) {
             const kk = base + i;
             if (this.mesh.has(kk)) { this.s.remove(this.mesh.get(kk)); this.mesh.delete(kk); }
@@ -338,12 +347,8 @@ class Vox {
         });
 
         const g = new THREE.PlaneGeometry(1, 1);
-
-        // top of soil block at y+1 (since soil block y=1 => top at 2.0)
-        // Put plane center at 2.5 so bottom edge is at 2.0 (sits on ground).
         const p = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
 
-        // 4-sided "box" (north/east/south/west)
         const rots = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
         for (let i = 0; i < 4; i++) {
             const mesh = new THREE.Mesh(g, m);
@@ -382,16 +387,16 @@ class Vox {
         const max = c.stages.length - 1;
 
         if (popped) {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), 1);
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
             return;
         }
 
         if (st >= max) {
-            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), rnd(c.drop.min, c.drop.max));
+            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), rnd(c.drop.min, c.drop.max));
             const b = rnd(c.bonus.min, c.bonus.max);
-            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), b);
+            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), b);
         } else {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 0.02, z + 0.5), 1);
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
         }
         this.partsBurst(x, y, z);
     }
@@ -452,7 +457,6 @@ class Vox {
         }, conf.regrow * 1000);
     }
 
-    // FIX: breaking dirt/grass/tilled removes the block to AIR (null) instead of turning to dirt
     async breakBlock(x, y, z) {
         if (x === INF.x && y === INF.y && z === INF.z) return null;
 
@@ -484,9 +488,7 @@ class Vox {
         if (x === INF.x && y === INF.y && z === INF.z) return false;
         await this.set(x, y, z, id);
 
-        // NEW: placed dirt regrows into grass after a few seconds
         if (id === "dirt") this.regrowLater(x, y, z);
-
         return true;
     }
 
@@ -519,6 +521,7 @@ class Vox {
         d.m = s;
     }
 
+    // FIX: items rest on the correct surface height (no dropping to y-1).
     async itemTick(dt, pl, bag) {
         for (let i = this.items.length - 1; i >= 0; i--) {
             const d = this.items[i];
@@ -527,8 +530,12 @@ class Vox {
             d.v.y -= 18 * dt;
             d.p.addScaledVector(d.v, dt);
 
-            // floor at y=0 top if y1 removed, or y1 top if present; just clamp to y=1.02 visually
-            const fy = Y1 - 1 + 0.02;
+            // clamp to the top of the column under the item
+            const bx = clamp(Math.floor(d.p.x), 0, W - 1);
+            const bz = clamp(Math.floor(d.p.z), 0, H - 1);
+            const top = this.topAt(bx, bz);
+            const fy = top + 0.05;
+
             if (d.p.y < fy) {
                 d.p.y = fy;
                 d.v.y *= -0.18;
@@ -588,8 +595,6 @@ class Vox {
         }
     }
 }
-
-function rnd(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
 
 // --- three ---
 const ren = new THREE.WebGLRenderer({ canvas: root.el.c, antialias: false });
@@ -903,75 +908,111 @@ function ctrl(dt) {
     pl.v.y -= conf.grav * dt;
 }
 
+// FIX: solid, non-glitchy collision (no edge-falling/sticking). Holes are walk/jump-out-able.
 function collide(dt) {
     const R = 0.25;
     const HEIGHT = 1.62;
     const EPS = 0.001;
 
-    const tileTop = (bx, bz) => {
-        const t = vox.get(bx, Y1, bz);
-        if (!t) return Y0 + 1;
-        if (t === "water") return Y1 + 0.85;
-        if (t === "path") return Y1 + 0.90;
-        return Y1 + 1;
+    const solidTop = (bx, bz) => {
+        if (bx < 0 || bz < 0 || bx >= W || bz >= H) return -Infinity;
+        // anything present at Y1 acts as a solid "step" surface for collision
+        return vox.topAt(bx, bz);
     };
 
-    // --- vertical first (CRITICAL) ---
+    // --- vertical ---
     pl.p.y += pl.v.y * dt;
 
-    const fx0 = Math.floor(pl.p.x - R);
-    const fx1 = Math.floor(pl.p.x + R);
-    const fz0 = Math.floor(pl.p.z - R);
-    const fz1 = Math.floor(pl.p.z + R);
-
-    let floor = -Infinity;
-    for (let x = fx0; x <= fx1; x++) {
-        for (let z = fz0; z <= fz1; z++) {
-            floor = Math.max(floor, tileTop(x, z));
-        }
-    }
+    const cx = clamp(Math.floor(pl.p.x), 0, W - 1);
+    const cz = clamp(Math.floor(pl.p.z), 0, H - 1);
+    const floorTop = solidTop(cx, cz);
 
     const feet = pl.p.y - HEIGHT;
-    if (feet < floor) {
-        pl.p.y += (floor - feet);
+    if (feet < floorTop) {
+        pl.p.y += (floorTop - feet);
         pl.v.y = 0;
         pl.on = true;
     } else {
         pl.on = false;
     }
 
-    // --- horizontal X ---
-    let nx = pl.p.x + pl.v.x * dt;
-    nx = clamp(nx, R, W - R);
-
+    // Only collide horizontally with columns whose top is above your feet (so you can step out of holes).
     const feetY = pl.p.y - HEIGHT;
 
-    const hitX =
-        feetY < tileTop(Math.floor(nx - R), bz0) - EPS ||
-        feetY < tileTop(Math.floor(nx + R), bz0) - EPS;
+    // Helper: resolve circle vs tile AABB for a proposed (x,z), but only adjust X or Z depending on axis.
+    const resolveX = (x, z) => {
+        const minX = clamp(Math.floor(x - R), 0, W - 1);
+        const maxX = clamp(Math.floor(x + R), 0, W - 1);
+        const minZ = clamp(Math.floor(z - R), 0, H - 1);
+        const maxZ = clamp(Math.floor(z + R), 0, H - 1);
 
-    if (hitX) {
-        nx = pl.p.x;
-        pl.v.x = 0;
-    }
+        let nx = x;
 
-    // --- horizontal Z ---
+        for (let bz = minZ; bz <= maxZ; bz++) {
+            for (let bx = minX; bx <= maxX; bx++) {
+                const top = solidTop(bx, bz);
+                if (top <= feetY + EPS) continue; // not a blocking column at current height
+
+                // AABB [bx, bx+1] x [bz, bz+1]
+                const closestX = clamp(nx, bx, bx + 1);
+                const closestZ = clamp(z, bz, bz + 1);
+
+                const dx = nx - closestX;
+                const dz = z - closestZ;
+                const dd = dx * dx + dz * dz;
+
+                if (dd < R * R - 1e-9) {
+                    // push out along X only
+                    if (dx >= 0) nx = (closestX + Math.sqrt(Math.max(0, R * R - dz * dz))) + EPS;
+                    else nx = (closestX - Math.sqrt(Math.max(0, R * R - dz * dz))) - EPS;
+                }
+            }
+        }
+        return nx;
+    };
+
+    const resolveZ = (x, z) => {
+        const minX = clamp(Math.floor(x - R), 0, W - 1);
+        const maxX = clamp(Math.floor(x + R), 0, W - 1);
+        const minZ = clamp(Math.floor(z - R), 0, H - 1);
+        const maxZ = clamp(Math.floor(z + R), 0, H - 1);
+
+        let nz = z;
+
+        for (let bz = minZ; bz <= maxZ; bz++) {
+            for (let bx = minX; bx <= maxX; bx++) {
+                const top = solidTop(bx, bz);
+                if (top <= feetY + EPS) continue;
+
+                const closestX = clamp(x, bx, bx + 1);
+                const closestZ = clamp(nz, bz, bz + 1);
+
+                const dx = x - closestX;
+                const dz = nz - closestZ;
+                const dd = dx * dx + dz * dz;
+
+                if (dd < R * R - 1e-9) {
+                    // push out along Z only
+                    if (dz >= 0) nz = (closestZ + Math.sqrt(Math.max(0, R * R - dx * dx))) + EPS;
+                    else nz = (closestZ - Math.sqrt(Math.max(0, R * R - dx * dx))) - EPS;
+                }
+            }
+        }
+        return nz;
+    };
+
+    // --- horizontal X then Z (stable, no edge snapping) ---
+    let nx = pl.p.x + pl.v.x * dt;
+    nx = clamp(nx, R, W - R);
+    nx = resolveX(nx, pl.p.z);
+
     let nz = pl.p.z + pl.v.z * dt;
     nz = clamp(nz, R, H - R);
-
-    const hitZ =
-        feetY < tileTop(bx0, Math.floor(nz - R)) - EPS ||
-        feetY < tileTop(bx0, Math.floor(nz + R)) - EPS;
-
-    if (hitZ) {
-        nz = pl.p.z;
-        pl.v.z = 0;
-    }
+    nz = resolveZ(nx, nz);
 
     pl.p.x = nx;
     pl.p.z = nz;
 }
-
 
 // --- raycast ---
 async function hit() {
@@ -1015,7 +1056,6 @@ async function use() {
         return;
     }
 
-    // NEW: right click with shovel turns grass into path (shorter), and path never auto-regrows
     if (s.k === "shovel_wood") {
         if (h.y === Y1) {
             const id = vox.get(h.x, h.y, h.z);
@@ -1084,7 +1124,6 @@ async function use() {
 }
 
 // --- crack overlay: crack1..crack6 ---
-// FIX: show crack texture on ALL sides of the block being broken, cycling crack1..crack6
 async function crackInit() {
     const urls = [
         "./Source/Assets/UI/Breaking/crack1.png",
@@ -1110,30 +1149,12 @@ async function crackInit() {
     const g = new THREE.PlaneGeometry(1.02, 1.02);
 
     const faces = [
-        { // +Z
-            pos: new THREE.Vector3(0.5, 0.5, 1.001),
-            rot: new THREE.Euler(0, 0, 0)
-        },
-        { // -Z
-            pos: new THREE.Vector3(0.5, 0.5, -0.001),
-            rot: new THREE.Euler(0, Math.PI, 0)
-        },
-        { // +X
-            pos: new THREE.Vector3(1.001, 0.5, 0.5),
-            rot: new THREE.Euler(0, -Math.PI * 0.5, 0)
-        },
-        { // -X
-            pos: new THREE.Vector3(-0.001, 0.5, 0.5),
-            rot: new THREE.Euler(0, Math.PI * 0.5, 0)
-        },
-        { // +Y (top)
-            pos: new THREE.Vector3(0.5, 1.001, 0.5),
-            rot: new THREE.Euler(-Math.PI * 0.5, 0, 0)
-        },
-        { // -Y (bottom)
-            pos: new THREE.Vector3(0.5, -0.001, 0.5),
-            rot: new THREE.Euler(Math.PI * 0.5, 0, 0)
-        }
+        { pos: new THREE.Vector3(0.5, 0.5, 1.001), rot: new THREE.Euler(0, 0, 0) },                 // +Z
+        { pos: new THREE.Vector3(0.5, 0.5, -0.001), rot: new THREE.Euler(0, Math.PI, 0) },            // -Z
+        { pos: new THREE.Vector3(1.001, 0.5, 0.5), rot: new THREE.Euler(0, -Math.PI * 0.5, 0) },     // +X
+        { pos: new THREE.Vector3(-0.001, 0.5, 0.5), rot: new THREE.Euler(0, Math.PI * 0.5, 0) },      // -X
+        { pos: new THREE.Vector3(0.5, 1.001, 0.5), rot: new THREE.Euler(-Math.PI * 0.5, 0, 0) },      // +Y
+        { pos: new THREE.Vector3(0.5, -0.001, 0.5), rot: new THREE.Euler(Math.PI * 0.5, 0, 0) }       // -Y
     ];
 
     crack.m = [];
