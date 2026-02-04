@@ -2,7 +2,32 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 const W = 32, H = 32;
 const Y0 = 0, Y1 = 1;
-const INF = { x: 0, y: 1, z: 0 };
+
+/*
+SPAWN AREA (simple hardcoded layout)
+- Platform is offset 3 blocks from the world edges (corner-ish): OX/OZ = 3
+- Three 3x3 STONE squares form a triangle-ish shape:
+    A: (OX..OX+2, OZ..OZ+2)
+    B: (OX..OX+2, OZ+3..OZ+5)
+    C: (OX+3..OX+5, OZ+3..OZ+5)
+- The "4th square" (OX+3..OX+5, OZ..OZ+2) stays GRASS, player spawns in the middle tile of that square.
+- Infinite water source sits on one side, 3 blocks away from the platform’s left edge:
+    water at (OX-3, Y1, OZ+1)
+*/
+const SPAWN = {
+    OX: 3,
+    OZ: 3,
+    // player spawns in the middle tile of the 4th (grass) 3x3 square
+    PX: 3 + 4, // OX+4
+    PZ: 3 + 1, // OZ+1
+    // infinite water
+    WX: 3 - 3, // OX-3
+    WY: Y1,
+    WZ: 3 + 1  // OZ+1
+};
+
+// Infinite water position (unbreakable by coordinate)
+const INF = { x: SPAWN.WX, y: SPAWN.WY, z: SPAWN.WZ };
 
 const conf = {
     reach: 6,
@@ -69,7 +94,10 @@ const blocks = {
     tilled_dry: { k: "tilled_dry", img: "./Source/Assets/Blocks/unhydrated.png", breakable: true },
     tilled_wet: { k: "tilled_wet", img: "./Source/Assets/Blocks/hydrated.png", breakable: true },
     water: { k: "water", img: "./Source/Assets/Blocks/water.png", breakable: true },
-    path: { k: "path", img: "./Source/Assets/Blocks/path.png", breakable: true }
+    path: { k: "path", img: "./Source/Assets/Blocks/path.png", breakable: true },
+
+    // NEW BLOCK (unbreakable)
+    stone: { k: "stone", img: "./Source/Assets/Blocks/stone.png", breakable: false }
 };
 
 const crops = {
@@ -287,12 +315,34 @@ class Vox {
     }
 
     async init() {
+        // base world
         for (let x = 0; x < W; x++) {
             for (let z = 0; z < H; z++) {
                 await this.set(x, Y0, z, "unbreak");
                 await this.set(x, Y1, z, "grass");
             }
         }
+
+        // spawn platform (three 3x3 stone squares)
+        const OX = SPAWN.OX, OZ = SPAWN.OZ;
+
+        const fill3x3 = async (sx, sz, id) => {
+            for (let x = sx; x < sx + 3; x++) {
+                for (let z = sz; z < sz + 3; z++) {
+                    if (!this.inPad(x, z)) continue;
+                    await this.set(x, Y1, z, id);
+                }
+            }
+        };
+
+        // "triangle-ish" 3 squares
+        await fill3x3(OX, OZ, "stone"); // A
+        await fill3x3(OX, OZ + 3, "stone"); // B
+        await fill3x3(OX + 3, OZ + 3, "stone"); // C
+
+        // The 4th square (OX+3, OZ) stays grass: DO NOTHING (already grass)
+
+        // infinite water source (unbreakable by coordinate)
         await this.set(INF.x, INF.y, INF.z, "water");
     }
 
@@ -458,6 +508,7 @@ class Vox {
     }
 
     async breakBlock(x, y, z) {
+        // infinite water stays unbreakable
         if (x === INF.x && y === INF.y && z === INF.z) return null;
 
         const id = this.get(x, y, z);
@@ -941,7 +992,6 @@ function collide(dt) {
     // Only collide horizontally with columns whose top is above your feet (so you can step out of holes).
     const feetY = pl.p.y - HEIGHT;
 
-    // Helper: resolve circle vs tile AABB for a proposed (x,z), but only adjust X or Z depending on axis.
     const resolveX = (x, z) => {
         const minX = clamp(Math.floor(x - R), 0, W - 1);
         const maxX = clamp(Math.floor(x + R), 0, W - 1);
@@ -953,9 +1003,8 @@ function collide(dt) {
         for (let bz = minZ; bz <= maxZ; bz++) {
             for (let bx = minX; bx <= maxX; bx++) {
                 const top = solidTop(bx, bz);
-                if (top <= feetY + EPS) continue; // not a blocking column at current height
+                if (top <= feetY + EPS) continue;
 
-                // AABB [bx, bx+1] x [bz, bz+1]
                 const closestX = clamp(nx, bx, bx + 1);
                 const closestZ = clamp(z, bz, bz + 1);
 
@@ -964,7 +1013,6 @@ function collide(dt) {
                 const dd = dx * dx + dz * dz;
 
                 if (dd < R * R - 1e-9) {
-                    // push out along X only
                     if (dx >= 0) nx = (closestX + Math.sqrt(Math.max(0, R * R - dz * dz))) + EPS;
                     else nx = (closestX - Math.sqrt(Math.max(0, R * R - dz * dz))) - EPS;
                 }
@@ -994,7 +1042,6 @@ function collide(dt) {
                 const dd = dx * dx + dz * dz;
 
                 if (dd < R * R - 1e-9) {
-                    // push out along Z only
                     if (dz >= 0) nz = (closestZ + Math.sqrt(Math.max(0, R * R - dx * dx))) + EPS;
                     else nz = (closestZ - Math.sqrt(Math.max(0, R * R - dx * dx))) - EPS;
                 }
@@ -1003,7 +1050,7 @@ function collide(dt) {
         return nz;
     };
 
-    // --- horizontal X then Z (stable, no edge snapping) ---
+    // --- horizontal ---
     let nx = pl.p.x + pl.v.x * dt;
     nx = clamp(nx, R, W - R);
     nx = resolveX(nx, pl.p.z);
@@ -1151,12 +1198,12 @@ async function crackInit() {
     const g = new THREE.PlaneGeometry(1.02, 1.02);
 
     const faces = [
-        { pos: new THREE.Vector3(0.5, 0.5, 1.001), rot: new THREE.Euler(0, 0, 0) },                 // +Z
-        { pos: new THREE.Vector3(0.5, 0.5, -0.001), rot: new THREE.Euler(0, Math.PI, 0) },            // -Z
-        { pos: new THREE.Vector3(1.001, 0.5, 0.5), rot: new THREE.Euler(0, -Math.PI * 0.5, 0) },     // +X
-        { pos: new THREE.Vector3(-0.001, 0.5, 0.5), rot: new THREE.Euler(0, Math.PI * 0.5, 0) },      // -X
-        { pos: new THREE.Vector3(0.5, 1.001, 0.5), rot: new THREE.Euler(-Math.PI * 0.5, 0, 0) },      // +Y
-        { pos: new THREE.Vector3(0.5, -0.001, 0.5), rot: new THREE.Euler(Math.PI * 0.5, 0, 0) }       // -Y
+        { pos: new THREE.Vector3(0.5, 0.5, 1.001), rot: new THREE.Euler(0, 0, 0) },
+        { pos: new THREE.Vector3(0.5, 0.5, -0.001), rot: new THREE.Euler(0, Math.PI, 0) },
+        { pos: new THREE.Vector3(1.001, 0.5, 0.5), rot: new THREE.Euler(0, -Math.PI * 0.5, 0) },
+        { pos: new THREE.Vector3(-0.001, 0.5, 0.5), rot: new THREE.Euler(0, Math.PI * 0.5, 0) },
+        { pos: new THREE.Vector3(0.5, 1.001, 0.5), rot: new THREE.Euler(-Math.PI * 0.5, 0, 0) },
+        { pos: new THREE.Vector3(0.5, -0.001, 0.5), rot: new THREE.Euler(Math.PI * 0.5, 0, 0) }
     ];
 
     crack.m = [];
@@ -1346,7 +1393,8 @@ async function start() {
     await vox.init();
     await holoInit();
 
-    pl.p.set(1.35, 2.65, 1.35);
+    // NEW: spawn on the grass "4th square" (middle tile)
+    pl.p.set(SPAWN.PX + 0.5, 2.65, SPAWN.PZ + 0.5);
 
     msg("Click to play");
     requestAnimationFrame(loop);
