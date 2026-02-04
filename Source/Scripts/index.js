@@ -892,31 +892,83 @@ function ctrl(dt) {
     pl.v.y -= conf.grav * dt;
 }
 
-// FIX: if y=1 block was broken to air, stand on y=0 unbreakable top (y=1)
+// FIX: prevent "auto step/teleport" between Y levels and prevent pushing into blocks.
+// Player can only move onto a higher top-surface if they have actually jumped high enough.
 function collide(dt) {
-    pl.p.x += pl.v.x * dt;
-    pl.p.y += pl.v.y * dt;
-    pl.p.z += pl.v.z * dt;
+    // player body approximated as a vertical capsule/column with radius in XZ
+    const R = 0.25;
+    const STEP_MAX = 0.90;   // allow into water (0.85 step), but NOT a full 1-block step (1.0)
+    const EPS = 0.001;
 
-    pl.p.x = clamp(pl.p.x, 0.2, W - 0.2);
-    pl.p.z = clamp(pl.p.z, 0.2, H - 0.2);
+    const tileTop = (bx, bz) => {
+        const topY1 = vox.get(bx, Y1, bz); // may be null
+        if (topY1) {
+            let top = Y1 + 1;          // 2.0
+            if (topY1 === "water") top -= 0.15; // 1.85
+            return top;
+        }
+        return Y0 + 1; // 1.0 (top of unbreak at y=0)
+    };
+
+    const curBx = Math.floor(pl.p.x);
+    const curBz = Math.floor(pl.p.z);
+    const curTop = tileTop(curBx, curBz);
+    const feet0 = pl.p.y - 1.62;
+
+    const blocksMoveTo = (nx, nz, baseTop, feetY) => {
+        const xs = [nx - R, nx + R];
+        const zs = [nz - R, nz + R];
+
+        for (let xi = 0; xi < 2; xi++) {
+            for (let zi = 0; zi < 2; zi++) {
+                const bx = Math.floor(xs[xi]);
+                const bz = Math.floor(zs[zi]);
+
+                // outside bounds acts like solid walls
+                if (bx < 0 || bz < 0 || bx >= W || bz >= H) return true;
+
+                const needTop = tileTop(bx, bz);
+                const stepUp = needTop - baseTop;
+
+                // If we'd need to go up too much, block unless the player's feet are already above that surface.
+                if (stepUp > STEP_MAX && feetY < (needTop - EPS)) return true;
+            }
+        }
+        return false;
+    };
+
+    // --- horizontal resolve (axis-by-axis) ---
+    let nx = pl.p.x + pl.v.x * dt;
+    let nz = pl.p.z;
+
+    // clamp world bounds early so corner checks match final coords
+    nx = clamp(nx, 0.2, W - 0.2);
+    nz = clamp(nz, 0.2, H - 0.2);
+
+    if (blocksMoveTo(nx, nz, curTop, feet0)) {
+        nx = pl.p.x;
+        pl.v.x = 0;
+    }
+
+    let nz2 = pl.p.z + pl.v.z * dt;
+    nz2 = clamp(nz2, 0.2, H - 0.2);
+
+    // use x after resolution for z test
+    if (blocksMoveTo(nx, nz2, curTop, feet0)) {
+        nz2 = pl.p.z;
+        pl.v.z = 0;
+    }
+
+    pl.p.x = nx;
+    pl.p.z = nz2;
+
+    // --- vertical resolve ---
+    pl.p.y += pl.v.y * dt;
 
     const bx = Math.floor(pl.p.x);
     const bz = Math.floor(pl.p.z);
 
-    const topY1 = vox.get(bx, Y1, bz); // may be null (air)
-    const topY0 = vox.get(bx, Y0, bz); // always unbreak
-
-    // Default ground is y=0 block top => y=1
-    let top = Y0 + 1;
-
-    if (topY1) {
-        // y=1 block exists => stand on its top (y=2), water is shorter
-        top = Y1 + 1;
-        if (topY1 === "water") top -= 0.15;
-    } else if (topY0) {
-        top = Y0 + 1;
-    }
+    let top = tileTop(bx, bz);
 
     const feet = pl.p.y - 1.62;
     if (feet < top) {
