@@ -61,6 +61,44 @@ body {
     height: 2px;
 }
 
+#xpwrap {
+    position: absolute;
+    bottom: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 420px;
+    pointer-events: none;
+    font-family: monospace;
+}
+
+#xplabel {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+#lvl {
+    color: #42f374;
+}
+
+#coins {
+    color: #ffd800;
+}
+
+#xpbar {
+    height: 8px;
+    background: #222;
+    border: 1px solid #000;
+}
+
+#xpfill {
+    height: 100%;
+    width: 0%;
+    background: #42f374;
+}
+
+
 #hot {
     position: absolute;
     left: 50%;
