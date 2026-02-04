@@ -382,16 +382,16 @@ class Vox {
         const max = c.stages.length - 1;
 
         if (popped) {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
             return;
         }
 
         if (st >= max) {
-            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), rnd(c.drop.min, c.drop.max));
+            this.spawnItem(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), rnd(c.drop.min, c.drop.max));
             const b = rnd(c.bonus.min, c.bonus.max);
-            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), b);
+            if (b > 0) this.spawnItem(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), b);
         } else {
-            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5), 1);
+            this.spawnItem(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
         }
         this.partsBurst(x, y, z);
     }
@@ -903,94 +903,72 @@ function ctrl(dt) {
     pl.v.y -= conf.grav * dt;
 }
 
-// FIX: prevent "auto step/teleport" between Y levels and prevent pushing into blocks.
-// Player can only move onto a higher top-surface if they have actually jumped high enough.
 function collide(dt) {
-    // player body approximated as a vertical capsule/column with radius in XZ
-    const R = 0.25;
-    const STEP_MAX = 0.90;   // allow into water (0.85 step), but NOT a full 1-block step (1.0)
+    const R = 0.25;        // player radius
+    const HEIGHT = 1.62;   // eye-to-feet
     const EPS = 0.001;
 
     const tileTop = (bx, bz) => {
-        const topY1 = vox.get(bx, Y1, bz); // may be null
-        if (topY1) {
-            let top = Y1 + 1;          // 2.0
-            if (topY1 === "water") top -= 0.15; // 1.85
-            return top;
-        }
-        return Y0 + 1; // 1.0 (top of unbreak at y=0)
+        const t = vox.get(bx, Y1, bz);
+        if (!t) return Y0 + 1;        // air above base
+        if (t === "water") return Y1 + 0.85;
+        if (t === "path") return Y1 + 0.90;
+        return Y1 + 1;
     };
 
-    const curBx = Math.floor(pl.p.x);
-    const curBz = Math.floor(pl.p.z);
-    const curTop = tileTop(curBx, curBz);
-    const feet0 = pl.p.y - 1.62;
-
-    const blocksMoveTo = (nx, nz, baseTop, feetY) => {
-        const xs = [nx - R, nx + R];
-        const zs = [nz - R, nz + R];
-
-        for (let xi = 0; xi < 2; xi++) {
-            for (let zi = 0; zi < 2; zi++) {
-                const bx = Math.floor(xs[xi]);
-                const bz = Math.floor(zs[zi]);
-
-                // outside bounds acts like solid walls
-                if (bx < 0 || bz < 0 || bx >= W || bz >= H) return true;
-
-                const needTop = tileTop(bx, bz);
-                const stepUp = needTop - baseTop;
-
-                // If we'd need to go up too much, block unless the player's feet are already above that surface.
-                if (stepUp > STEP_MAX && feetY < (needTop - EPS)) return true;
-            }
-        }
-        return false;
+    const solidAt = (x, z, feetY) => {
+        const bx = Math.floor(x);
+        const bz = Math.floor(z);
+        if (bx < 0 || bz < 0 || bx >= W || bz >= H) return true;
+        return feetY < tileTop(bx, bz) - EPS;
     };
 
-    // --- horizontal resolve (axis-by-axis) ---
+    // --- horizontal X ---
     let nx = pl.p.x + pl.v.x * dt;
-    let nz = pl.p.z;
+    nx = clamp(nx, R, W - R);
 
-    // clamp world bounds early so corner checks match final coords
-    nx = clamp(nx, 0.2, W - 0.2);
-    nz = clamp(nz, 0.2, H - 0.2);
-
-    if (blocksMoveTo(nx, nz, curTop, feet0)) {
+    const feetY = pl.p.y - HEIGHT;
+    if (
+        solidAt(nx - R, pl.p.z, feetY) ||
+        solidAt(nx + R, pl.p.z, feetY)
+    ) {
         nx = pl.p.x;
         pl.v.x = 0;
     }
 
-    let nz2 = pl.p.z + pl.v.z * dt;
-    nz2 = clamp(nz2, 0.2, H - 0.2);
+    // --- horizontal Z ---
+    let nz = pl.p.z + pl.v.z * dt;
+    nz = clamp(nz, R, H - R);
 
-    // use x after resolution for z test
-    if (blocksMoveTo(nx, nz2, curTop, feet0)) {
-        nz2 = pl.p.z;
+    if (
+        solidAt(nx, nz - R, feetY) ||
+        solidAt(nx, nz + R, feetY)
+    ) {
+        nz = pl.p.z;
         pl.v.z = 0;
     }
 
     pl.p.x = nx;
-    pl.p.z = nz2;
+    pl.p.z = nz;
 
-    // --- vertical resolve ---
+    // --- vertical ---
     pl.p.y += pl.v.y * dt;
 
     const bx = Math.floor(pl.p.x);
     const bz = Math.floor(pl.p.z);
+    const top = tileTop(bx, bz);
 
-    let top = tileTop(bx, bz);
-
-    const feet = pl.p.y - 1.62;
+    const feet = pl.p.y - HEIGHT;
     if (feet < top) {
         pl.p.y += (top - feet);
-        if (pl.v.y < 0) pl.v.y = 0;
+        pl.v.y = 0;
         pl.on = true;
     } else {
         pl.on = false;
     }
 
-    pl.p.y = Math.max(pl.p.y, 1.4);
+    // absolute safety clamp
+    pl.p.y = Math.max(pl.p.y, top + HEIGHT);
 }
 
 // --- raycast ---
