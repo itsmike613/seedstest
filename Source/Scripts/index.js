@@ -67,7 +67,8 @@ const blocks = {
     unbreak: { k: "unbreak", img: "./Source/Assets/Blocks/unbreakable.png", breakable: false },
     tilled_dry: { k: "tilled_dry", img: "./Source/Assets/Blocks/unhydrated.png", breakable: true },
     tilled_wet: { k: "tilled_wet", img: "./Source/Assets/Blocks/hydrated.png", breakable: true },
-    water: { k: "water", img: "./Source/Assets/Blocks/water.png", breakable: true }
+    water: { k: "water", img: "./Source/Assets/Blocks/water.png", breakable: true },
+    path: { k: "path", img: "./Source/Assets/Blocks/path.png", breakable: true } // NEW
 };
 
 const crops = {
@@ -262,6 +263,12 @@ class Vox {
         if (id === "water") {
             mesh.scale.y = 0.85;
             mesh.position.y -= 0.075;
+        }
+
+        // NEW: path is slightly shorter like water (but different)
+        if (id === "path") {
+            mesh.scale.y = 0.90;
+            mesh.position.y -= 0.05;
         }
 
         this.s.add(mesh);
@@ -476,6 +483,10 @@ class Vox {
         if (y !== Y1) return false;
         if (x === INF.x && y === INF.y && z === INF.z) return false;
         await this.set(x, y, z, id);
+
+        // NEW: placed dirt regrows into grass after a few seconds
+        if (id === "dirt") this.regrowLater(x, y, z);
+
         return true;
     }
 
@@ -1020,6 +1031,17 @@ async function use() {
         if (h.y === Y1) {
             const ok = await vox.till(h.x, h.z);
             if (!ok) msg("Needs water within 5");
+        }
+        return;
+    }
+
+    // NEW: right click with shovel turns grass into path (shorter), and path never auto-regrows
+    if (s.k === "shovel_wood") {
+        if (h.y === Y1) {
+            const id = vox.get(h.x, h.y, h.z);
+            if (id === "grass") {
+                await vox.set(h.x, h.y, h.z, "path");
+            }
         }
         return;
     }
