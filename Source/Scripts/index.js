@@ -55,8 +55,8 @@ const items = {
     seed_wheat: { k: "seed_wheat", n: "Wheat Seeds", t: "seed", stack: 256, img: "./Source/Assets/Crops/Wheat/seed.png" },
     seed_carrot: { k: "seed_carrot", n: "Carrot Seeds", t: "seed", stack: 256, img: "./Source/Assets/Crops/Carrot/seed.png" },
 
-    wheat: { k: "wheat", n: "Wheat", t: "food", stack: 256, img: "./Source/Assets/Crops/Wheat/wheat.png" },
-    carrot: { k: "carrot", n: "Carrot", t: "food", stack: 256, img: "./Source/Assets/Crops/Carrot/carrot.png" },
+    wheat: { k: "wheat", n: "Wheat", t: "food", stack: 256, img: "./Source/Assets/Crops/Wheat/item.png" },
+    carrot: { k: "carrot", n: "Carrot", t: "food", stack: 256, img: "./Source/Assets/Crops/Carrot/item.png" },
 
     dirt: { k: "dirt", n: "Dirt", t: "block", stack: 256, img: "./Source/Assets/Blocks/dirt.png" },
     water: { k: "water", n: "Water", t: "block", stack: 256, img: "./Source/Assets/Blocks/water.png" }
@@ -791,6 +791,8 @@ function setOpen(v) {
     root.el.inv.classList.toggle("hide", !open);
     if (open) {
         if (document.pointerLockElement) document.exitPointerLock();
+    } else {
+        root.el.c.requestPointerLock();
     }
 }
 
