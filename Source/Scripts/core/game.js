@@ -3,7 +3,7 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 import { conf } from "../config/conf.js";
-import { W, H, Y1, INF } from "../config/constants.js";
+import { W, H, Y1, INF, YB } from "../config/constants.js";
 import { clamp } from "../util/math.js";
 import { key } from "../util/gridKey.js";
 
@@ -368,11 +368,10 @@ export class Game {
         const h = await this.hit();
         if (!h) return;
 
-        // NEW: bushes should be usable regardless of held item, and should not place blocks
-        if (h.y === Y1) {
+        if (h.y === YB) {
             const b = this.vox.bushAt(h.x, h.y, h.z);
             if (b) {
-                const r = await this.vox.useBush(h.x, h.y, h.z);
+                const r = await this.vox.useBush(h.x, h.z);
                 if (!r.ok && r.why === "not_ready") this.msg("Not ready");
                 return;
             }
