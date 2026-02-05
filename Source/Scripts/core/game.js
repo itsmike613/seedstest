@@ -117,6 +117,9 @@ export class Game {
         this.bag.hot[2] = { k: "bucket_empty", c: 1 };
         this.bag.hot[3] = { k: "seed_wheat", c: 3 };
         this.bag.hot[4] = { k: "seed_carrot", c: 3 };
+
+        this.bag.hot[5] = { k: "seed_blueberry", c: 3 };
+        this.bag.hot[6] = { k: "seed_raspberry", c: 3 };
     }
 
     msg(t) {
@@ -362,11 +365,21 @@ export class Game {
     }
 
     async use() {
-        const s = this.bag.hot[this.bag.sel];
-        if (!s) return;
-
         const h = await this.hit();
         if (!h) return;
+
+        // NEW: bushes should be usable regardless of held item, and should not place blocks
+        if (h.y === Y1) {
+            const b = this.vox.bushAt(h.x, h.y, h.z);
+            if (b) {
+                const r = await this.vox.useBush(h.x, h.y, h.z);
+                if (!r.ok && r.why === "not_ready") this.msg("Not ready");
+                return;
+            }
+        }
+
+        const s = this.bag.hot[this.bag.sel];
+        if (!s) return;
 
         const held = items[s.k];
 
@@ -388,7 +401,13 @@ export class Game {
 
         if (held.t === "seed") {
             if (h.y === Y1) {
-                const type = (s.k === "seed_wheat") ? "wheat" : (s.k === "seed_carrot" ? "carrot" : null);
+                const type =
+                    (s.k === "seed_wheat") ? "wheat" :
+                        (s.k === "seed_carrot") ? "carrot" :
+                            (s.k === "seed_blueberry") ? "blueberry" :
+                                (s.k === "seed_raspberry") ? "raspberry" :
+                                    null;
+
                 if (!type) return;
                 const ok = await this.vox.plant(h.x, h.z, type);
                 if (ok) {

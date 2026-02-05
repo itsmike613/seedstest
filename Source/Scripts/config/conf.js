@@ -14,5 +14,6 @@ export const conf = {
     hydelay: 1.2,
     unhydelay: 2.5,
     regrow: 4.5,
-    grow: 2.2
+    grow: 2.2,
+    berry: 5.5
 };

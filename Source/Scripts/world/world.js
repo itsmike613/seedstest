@@ -23,12 +23,13 @@ export class Vox {
         this.tilled = new Map(); // key => {wet, ts}
         this.crop = new Map();   // key => {type, st, ts}
 
+        this.bush = new Map();
+
         this.renderer = new VoxRenderer(scene, tex);
         this.items = new ItemSystem(scene, tex, (x, z) => this.topAt(x, z));
         this.parts = new ParticleSystem(scene);
     }
 
-    // expose meshes for raycast (Game uses this.vox.mesh.values())
     get mesh() { return this.renderer.mesh; }
 
     inPad(x, z) { return x >= 0 && z >= 0 && x < W && z < H; }
@@ -88,8 +89,11 @@ export class Vox {
     async plant(x, z, type) {
         const id = this.get(x, Y1, z);
         if (id !== "tilled_dry" && id !== "tilled_wet") return false;
+
         const k = key(x, Y1, z);
         if (this.crop.has(k)) return false;
+        if (this.bush.has(k)) return false;
+
         this.crop.set(k, { type, st: 0, ts: now() });
         await this.renderer.setCropPlanes(x, Y1, z, type, 0);
         return true;
@@ -99,6 +103,83 @@ export class Vox {
         const k = key(x, Y1, z);
         this.crop.delete(k);
         this.renderer.removeCropPlanes(x, Y1, z);
+    }
+
+    isBushId(id) {
+        return id === "blueberry_bush_empty" || id === "blueberry_bush_full" ||
+            id === "raspberry_bush_empty" || id === "raspberry_bush_full";
+    }
+
+    bushAt(x, y, z) {
+        if (y !== Y1) return null;
+        return this.bush.get(key(x, y, z)) || null;
+    }
+
+    async convertCropToBush(x, y, z, type) {
+        const def = crops[type];
+        if (!def || !def.bush) return;
+
+        const k = key(x, y, z);
+
+        this.crop.delete(k);
+        this.renderer.removeCropPlanes(x, y, z);
+
+        this.tilled.delete(k);
+
+        await this.set(x, y, z, def.bush.empty);
+        this.bush.set(k, { type, full: false, ts: now() });
+    }
+
+    async setBushVisual(x, y, z, full) {
+        const k = key(x, y, z);
+        const b = this.bush.get(k);
+        if (!b) return;
+
+        const def = crops[b.type];
+        const id = full ? def.bush.full : def.bush.empty;
+
+        b.full = full;
+        b.ts = now();
+
+        await this.set(x, y, z, id);
+    }
+
+    async useBush(x, y, z) {
+        const b = this.bushAt(x, y, z);
+        if (!b) return { ok: false, why: "not_bush" };
+
+        if (!b.full) return { ok: false, why: "not_ready" };
+
+        const def = crops[b.type];
+        const drop = def.bush.berry;
+
+        this.items.spawn(drop.item, new THREE.Vector3(x + 0.5, y + 1.25, z + 0.5), rnd(drop.min, drop.max));
+        this.parts.burst(x, y, z);
+
+        await this.setBushVisual(x, y, z, false);
+        return { ok: true, why: "harvested" };
+    }
+
+    async breakBush(x, y, z) {
+        const k = key(x, y, z);
+        const b = this.bush.get(k);
+        if (!b) return false;
+
+        const def = crops[b.type];
+        const seed = def.seed;
+
+        this.items.spawn(seed, new THREE.Vector3(x + 0.5, y + 1.25, z + 0.5), 1);
+
+        if (b.full) {
+            const drop = def.bush.berry;
+            this.items.spawn(drop.item, new THREE.Vector3(x + 0.5, y + 1.25, z + 0.5), rnd(drop.min, drop.max));
+        }
+
+        this.bush.delete(k);
+
+        await this.set(x, y, z, null);
+        this.parts.burst(x, y, z);
+        return true;
     }
 
     async dropCrop(x, y, z, type, popped) {
@@ -165,6 +246,21 @@ export class Vox {
 
     async growTick() {
         const t = now();
+
+        for (const [k, b] of this.bush) {
+            if (b.full) continue;
+            if ((t - b.ts) < conf.berry) continue;
+
+            const p = parse(k);
+            const cur = this.get(p.x, p.y, p.z);
+            if (!cur || !this.isBushId(cur)) {
+                this.bush.delete(k);
+                continue;
+            }
+
+            await this.setBushVisual(p.x, p.y, p.z, true);
+        }
+
         for (const [k, c] of this.crop) {
             if ((t - c.ts) < conf.grow) continue;
             c.ts = t;
@@ -178,6 +274,10 @@ export class Vox {
             if (c.st < max) {
                 c.st++;
                 await this.renderer.setCropPlanes(p.x, p.y, p.z, c.type, c.st);
+
+                if (c.st >= max && crops[c.type].bush) {
+                    await this.convertCropToBush(p.x, p.y, p.z, c.type);
+                }
             }
         }
     }
@@ -194,6 +294,14 @@ export class Vox {
         const id = this.get(x, y, z);
         if (!id) return null;
         if (!blocks[id].breakable) return null;
+
+        if (y === Y1) {
+            const bk = key(x, y, z);
+            if (this.bush.has(bk)) {
+                const ok = await this.breakBush(x, y, z);
+                return ok ? "bush" : null;
+            }
+        }
 
         if (y === Y1) {
             await this.breakCrop(x, z);
@@ -217,6 +325,11 @@ export class Vox {
         if (!this.inPad(x, z)) return false;
         if (y !== Y1) return false;
         if (x === INF.x && y === INF.y && z === INF.z) return false;
+
+        const k = key(x, y, z);
+        if (this.crop.has(k)) return false;
+        if (this.bush.has(k)) return false;
+
         await this.set(x, y, z, id);
         if (id === "dirt") this.regrowLater(x, y, z);
         return true;
