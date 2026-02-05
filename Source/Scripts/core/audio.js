@@ -10,7 +10,7 @@ export class AudioManager {
         this.musicGain = null;
 
         this.sfxVolume = 0.9;
-        this.musicVolume = 0.65;
+        this.musicVolume = 0.50;
 
         this._bufCache = new Map();     // url -> AudioBuffer
         this._loadPromises = new Map(); // url -> Promise<AudioBuffer>
@@ -22,13 +22,12 @@ export class AudioManager {
             on: false,
             tracks: [],
             i: 0,
-            src: null
+            src: null,
+            gen: 0 // generation token to prevent overlap/races
         };
 
-        // ducking for footsteps (mining etc.)
         this._footDuck = 1.0;
 
-        // --- default asset mapping (edit as you like) ---
         this.SFX_DIR = "./Source/Assets/Audio/SFX/";
         this.MUSIC_DIR = "./Source/Assets/Audio/Music/";
 
@@ -65,14 +64,12 @@ export class AudioManager {
             bucket_fill: 1,
             bucket_pour: 1,
 
-            // footsteps should never stack
             footstep_grass: 1,
             footstep_path: 1,
             footstep_dirt: 1
         };
     }
 
-    // Call this from a user gesture (mousedown/keydown) to satisfy autoplay rules.
     async unlock() {
         this._ensureCtx();
         try { await this.ctx.resume(); } catch { /* ignore */ }
@@ -110,7 +107,7 @@ export class AudioManager {
         } else {
             const t = this.ctx.currentTime;
             this.sfxGain.gain.setTargetAtTime(sfx, t, 0.02);
-            this.musicGain.gain.setTargetAtTime(music, t, 0.02);
+            this.musicGain.gain.setTargetAtTime(music, t, 0.03);
         }
     }
 
@@ -138,20 +135,16 @@ export class AudioManager {
         this._applyVolumes(false);
     }
 
-    // Duck ONLY footsteps (good for mining).
-    // factor < 1 lowers footsteps. attack/release are in seconds-ish (smoothed via setTargetAtTime).
     setFootDuck(factor = 1.0, attack = 0.03, release = 0.12) {
         this._ensureCtx();
         const f = Math.max(0, factor);
         const changed = (Math.abs(f - this._footDuck) > 1e-4);
         this._footDuck = f;
 
-        // choose tau based on direction
         const tau = (f < 1) ? attack : release;
         if (changed) this._applyFootDuck(false, Math.max(0.001, tau));
     }
 
-    // Preload optional (safe to call; failures won't crash)
     async preloadSfx(names = []) {
         this._ensureCtx();
         const urls = names
@@ -211,7 +204,7 @@ export class AudioManager {
 
     _pickPlaybackRate(pitchRandom) {
         if (!pitchRandom || pitchRandom <= 0) return 1;
-        const r = (Math.random() * 2 - 1) * pitchRandom; // [-pitchRandom, +pitchRandom]
+        const r = (Math.random() * 2 - 1) * pitchRandom;
         return Math.max(0.25, 1 + r);
     }
 
@@ -236,8 +229,7 @@ export class AudioManager {
         else this._activeVoices.set(k, n);
     }
 
-    // opts:
-    // volume, pitchRandom, cooldown, maxVoices, bus: "sfx" | "foot"
+    // opts: volume, pitchRandom, cooldown, maxVoices, bus: "sfx" | "foot"
     async playSfx(nameOrUrl, opts = {}) {
         this._ensureCtx();
 
@@ -287,33 +279,48 @@ export class AudioManager {
     }
 
     // -----------------------------
-    // Music playlist
+    // Music playlist (no overlap)
     // -----------------------------
+    _stopCurrentMusicSource() {
+        if (!this._music.src) return;
+        const s = this._music.src;
+        this._music.src = null;
+
+        try { s.onended = null; } catch { }
+        try { s.stop(); } catch { }
+        try { s.disconnect(); } catch { }
+    }
+
     startMusicPlaylist(tracks = []) {
         this._ensureCtx();
+
+        // invalidate any in-flight async starts + stop current source
+        this._music.gen++;
+        this._stopCurrentMusicSource();
+
         this._music.tracks = tracks.map(t => this._resolveMusicUrl(t)).filter(Boolean);
         this._music.i = 0;
         this._music.on = true;
 
-        this._startNextTrack();
+        this._startNextTrack(this._music.gen);
     }
 
     stopMusic() {
+        this._ensureCtx();
         this._music.on = false;
         this._music.tracks = [];
         this._music.i = 0;
 
-        if (this._music.src) {
-            try { this._music.src.onended = null; } catch { }
-            try { this._music.src.stop(); } catch { }
-            try { this._music.src.disconnect(); } catch { }
-            this._music.src = null;
-        }
+        this._music.gen++;
+        this._stopCurrentMusicSource();
     }
 
-    async _startNextTrack() {
+    async _startNextTrack(gen) {
         if (!this._music.on) return;
+        if (gen !== this._music.gen) return;
         if (!this._music.tracks.length) return;
+
+        this._stopCurrentMusicSource();
 
         const url = this._music.tracks[this._music.i % this._music.tracks.length];
         this._music.i++;
@@ -322,11 +329,12 @@ export class AudioManager {
         try {
             buf = await this._loadBuffer(url);
         } catch {
-            if (this._music.on) this._startNextTrack();
+            if (this._music.on && gen === this._music.gen) this._startNextTrack(gen);
             return;
         }
 
         if (!this._music.on) return;
+        if (gen !== this._music.gen) return;
 
         const src = this.ctx.createBufferSource();
         src.buffer = buf;
@@ -335,10 +343,12 @@ export class AudioManager {
 
         src.onended = () => {
             if (!this._music.on) return;
-            this._startNextTrack();
+            if (gen !== this._music.gen) return;
+            this._startNextTrack(gen);
         };
 
         this._music.src = src;
+
         try { src.start(); } catch { /* ignore */ }
     }
 }

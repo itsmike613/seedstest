@@ -3,14 +3,12 @@
 export const K = Object.create(null);
 
 export function installInput(game) {
+    game._musicStarted = false;
+
     addEventListener("resize", () => game.onResize());
 
     document.addEventListener("pointerlockchange", () => {
         game.lock = (document.pointerLockElement === game.root.el.c);
-
-        if (!game.lock && game.audio) {
-            game.audio.stopAllLoops();
-        }
     });
 
     addEventListener("mousemove", (e) => {
@@ -32,7 +30,9 @@ export function installInput(game) {
         if (!game.lock) {
             game.root.el.c.requestPointerLock();
 
-            if (game.audio) {
+            if (game.audio && !game._musicStarted) {
+                game._musicStarted = true;
+
                 game.audio.startMusicPlaylist([
                     "./Source/Assets/Audio/Music/track1.m4a",
                     "./Source/Assets/Audio/Music/track2.m4a"
