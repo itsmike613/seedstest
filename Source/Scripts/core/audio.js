@@ -44,8 +44,8 @@ export class AudioManager {
             plant: this.SFX_DIR + "plant.ogg",
 
             place_dirt: this.SFX_DIR + "place_dirt.ogg",
-            bucket_fill: this.SFX_DIR + "bucket_fill.ogg",
-            bucket_pour: this.SFX_DIR + "bucket_pour.ogg"
+            bucket_fill: this.SFX_DIR + "bucket_fill.mp3",
+            bucket_pour: this.SFX_DIR + "bucket_pour.mp3"
         };
     }
 
