@@ -1,0 +1,13 @@
+#msg {
+    position: absolute;
+    left: 50%;
+    top: 18px;
+    transform: translateX(-50%);
+    background: var(--bg);
+    border: 1px solid var(--bd);
+    border-radius: 12px;
+    padding: 10px 14px;
+    color: rgba(255, 255, 255, .92);
+    font-size: 22px;
+    backdrop-filter: blur(2px);
+}

@@ -1,0 +1,9 @@
+#ui {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+}
+
+.hide {
+    display: none !important;
+}

@@ -1,0 +1,61 @@
+#hot {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+#bar {
+    display: grid;
+    grid-template-columns: repeat(9, 44px);
+    gap: 6px;
+    padding: 10px;
+    background: var(--bg);
+    border: 1px solid var(--bd);
+    border-radius: 10px;
+    backdrop-filter: blur(2px);
+}
+
+/* shared slot styling (base) */
+.slot {
+    width: 44px;
+    height: 44px;
+    background: rgba(0, 0, 0, .25);
+    border: 1px solid rgba(255, 255, 255, .10);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+}
+
+.icon {
+    position: absolute;
+    inset: 6px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    image-rendering: pixelated;
+}
+
+.num {
+    position: absolute;
+    right: 6px;
+    bottom: 4px;
+    color: var(--wh);
+    font-size: 18px;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, .6);
+    letter-spacing: .5px;
+}
+
+#sel {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 2px solid rgba(255, 255, 255, .75);
+    border-radius: 10px;
+    pointer-events: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, .35) inset;
+    top: 10px;
+    left: 10px;
+    transform: translateX(0px);
+}

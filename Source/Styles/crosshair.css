@@ -1,0 +1,25 @@
+#cross {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    transform: translate(-50%, -50%);
+}
+
+#cross::before,
+#cross::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 2px;
+    height: 10px;
+    background: rgba(255, 255, 255, .85);
+    transform: translate(-50%, -50%);
+}
+
+#cross::after {
+    width: 10px;
+    height: 2px;
+}

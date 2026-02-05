@@ -1,0 +1,69 @@
+#inv {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, .20);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#pane {
+    width: min(640px, 92vw);
+    background: var(--bg2);
+    border: 1px solid var(--bd);
+    border-radius: 14px;
+    padding: 16px;
+    backdrop-filter: blur(3px);
+}
+
+#grid {
+    display: grid;
+    grid-template-columns: repeat(9, 56px);
+    gap: 8px;
+    justify-content: center;
+}
+
+#grid .slot {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+}
+
+#grid .icon {
+    inset: 8px;
+}
+
+#grid .num {
+    font-size: 20px;
+}
+
+#hint {
+    margin-top: 10px;
+    color: rgba(255, 255, 255, .85);
+    font-size: 18px;
+    text-align: center;
+    opacity: .9;
+}
+
+#carry {
+    position: fixed;
+    width: 48px;
+    height: 48px;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+#carry .slot {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+}
+
+#carry .icon {
+    inset: 6px;
+}
+
+#carry .num {
+    font-size: 18px;
+}
