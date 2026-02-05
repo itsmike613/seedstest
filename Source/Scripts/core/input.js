@@ -7,6 +7,10 @@ export function installInput(game) {
 
     document.addEventListener("pointerlockchange", () => {
         game.lock = (document.pointerLockElement === game.root.el.c);
+
+        if (!game.lock && game.audio) {
+            game.audio.stopAllLoops();
+        }
     });
 
     addEventListener("mousemove", (e) => {
@@ -22,8 +26,21 @@ export function installInput(game) {
     });
 
     addEventListener("mousedown", async (e) => {
+        if (game.audio) game.audio.unlock();
+
         if (game.open) return;
-        if (!game.lock) { game.root.el.c.requestPointerLock(); return; }
+        if (!game.lock) {
+            game.root.el.c.requestPointerLock();
+
+            if (game.audio) {
+                game.audio.startMusicPlaylist([
+                    "./Source/Assets/Audio/Music/track1.m4a",
+                    "./Source/Assets/Audio/Music/track2.m4a"
+                ]);
+            }
+            return;
+        }
+
         if (e.button === 0) game.mine.on = true;
         if (e.button === 2) await game.use();
     });
@@ -39,6 +56,8 @@ export function installInput(game) {
     addEventListener("contextmenu", (e) => e.preventDefault());
 
     addEventListener("keydown", (e) => {
+        if (game.audio) game.audio.unlock();
+
         game.prevent(e);
         K[e.code] = true;
 

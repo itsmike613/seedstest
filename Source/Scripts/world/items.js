@@ -7,11 +7,12 @@ import { W, H } from "../config/constants.js";
 import { clamp, d2, now } from "../util/math.js";
 
 export class ItemSystem {
-    constructor(scene, tex, topAtFn) {
+    constructor(scene, tex, topAtFn, onPickupFn = null) {
         this.s = scene;
         this.t = tex;
         this.topAt = topAtFn;
         this.items = [];
+        this.onPickup = onPickupFn;
     }
 
     spawn(k, p, c) {
@@ -70,6 +71,7 @@ export class ItemSystem {
             if (d2(pp, d.p) < conf.pick * conf.pick) {
                 const left = bag.add(d.k, d.c);
                 if (left <= 0) {
+                    if (this.onPickup) this.onPickup(d.k, d.c);
                     this.s.remove(d.m);
                     this.items.splice(i, 1);
                 } else {

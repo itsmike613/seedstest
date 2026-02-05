@@ -26,8 +26,19 @@ export class Vox {
         this.bush = new Map();
 
         this.renderer = new VoxRenderer(scene, tex);
-        this.items = new ItemSystem(scene, tex, (x, z) => this.topAt(x, z));
+
+        // pickup callback is set later by Game via setOnPickup()
+        this._onPickup = null;
+
+        this.items = new ItemSystem(scene, tex, (x, z) => this.topAt(x, z), () => {
+            if (this._onPickup) this._onPickup();
+        });
+
         this.parts = new ParticleSystem(scene);
+    }
+
+    setOnPickup(fn) {
+        this._onPickup = fn;
     }
 
     get mesh() { return this.renderer.mesh; }
