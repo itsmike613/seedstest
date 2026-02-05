@@ -1,16 +1,5 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
-/**
- * Visual upgrade pass (shader-pack-ish vibe) WITHOUT changing gameplay rules:
- * - Better lighting + shadows + tone mapping
- * - Simple gradient sky
- * - Slight atmospheric fog tuning
- * - Subtle crop “wind sway”
- * - Water looks nicer (standard material + gentle texture flow)
- *
- * No gameplay constants/logic changed.
- */
-
 // -----------------------------
 // Config / Constants
 // -----------------------------
@@ -676,7 +665,7 @@ class Vox {
         s.scale.set(0.6, 0.6, 0.6);
         s.position.copy(d.p);
 
-        // Visual: sprite shadows off (keeps it clean)
+        // Visual: sprite shadows off
         this.s.add(s);
         d.m = s;
     }
@@ -690,7 +679,6 @@ class Vox {
             d.v.y -= 18 * dt;
             d.p.addScaledVector(d.v, dt);
 
-            // clamp to the top of the column under the item
             const bx = clamp(Math.floor(d.p.x), 0, W - 1);
             const bz = clamp(Math.floor(d.p.z), 0, H - 1);
             const top = this.topAt(bx, bz);
@@ -1024,7 +1012,7 @@ class Hologram {
 }
 
 // -----------------------------
-// Game (ties everything together, keeps behavior)
+// Game
 // -----------------------------
 class Game {
     constructor(root) {
@@ -1300,7 +1288,7 @@ class Game {
     }
 
     // -----------------------------
-    // Movement / Collision (unchanged math)
+    // Movement / Collision
     // -----------------------------
     damp(v, t, k, dt) {
         const a = 1 - Math.exp(-k * dt);
@@ -1335,7 +1323,7 @@ class Game {
         this.pl.v.y -= conf.grav * dt;
     }
 
-    // Solid collision (unchanged)
+    // Solid collision
     collide(dt) {
         const R = 0.25;
         const HEIGHT = 1.62;
@@ -1422,7 +1410,6 @@ class Game {
             return nz;
         };
 
-        // --- horizontal X then Z ---
         let nx = this.pl.p.x + this.pl.v.x * dt;
         nx = clamp(nx, R, W - R);
         nx = resolveX(nx, this.pl.p.z);
@@ -1436,7 +1423,7 @@ class Game {
     }
 
     // -----------------------------
-    // Raycast + Use (unchanged decisions)
+    // Raycast + Use
     // -----------------------------
     async hit() {
         this.camSync();
@@ -1642,7 +1629,6 @@ class Game {
         await this.vox.growTick();
         await this.vox.itemTick(dt, this.pl.p, this.bag);
 
-        // Visual-only updates
         this.vox.visualTick();
         this.sky.tick();
 
