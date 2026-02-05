@@ -33,23 +33,23 @@ export class AudioManager {
         this.MUSIC_DIR = "./Source/Assets/Audio/Music/";
 
         this.sfx = {
-            footstep_grass: this.SFX_DIR + "footstep_grass.ogg",
-            footstep_path: this.SFX_DIR + "footstep_path.ogg",
-            footstep_dirt: this.SFX_DIR + "footstep_dirt.ogg",
+            footstep_grass: this.SFX_DIR + "footstep_grass.mp3",
+            footstep_path: this.SFX_DIR + "footstep_path.mp3",
+            footstep_dirt: this.SFX_DIR + "footstep_dirt.mp3",
 
-            hoe: this.SFX_DIR + "hoe.ogg",
-            shovel: this.SFX_DIR + "shovel.ogg",
+            hoe: this.SFX_DIR + "hoe.mp3",
+            shovel: this.SFX_DIR + "shovel.mp3",
 
-            mine_hit: this.SFX_DIR + "mine_hit.ogg",
-            mine_break: this.SFX_DIR + "mine_break.ogg",
+            mine_hit: this.SFX_DIR + "mine_hit.mp3",
+            mine_break: this.SFX_DIR + "mine_break.mp3",
 
-            pickup: this.SFX_DIR + "pickup.ogg",
-            harvest: this.SFX_DIR + "harvest.ogg",
-            plant: this.SFX_DIR + "plant.ogg",
+            pickup: this.SFX_DIR + "pickup.mp3",
+            harvest: this.SFX_DIR + "harvest.mp3",
+            plant: this.SFX_DIR + "plant.mp3",
 
-            place_dirt: this.SFX_DIR + "place_dirt.ogg",
-            bucket_fill: this.SFX_DIR + "bucket_fill.ogg",
-            bucket_pour: this.SFX_DIR + "bucket_pour.ogg"
+            place_dirt: this.SFX_DIR + "place_dirt.mp3",
+            bucket_fill: this.SFX_DIR + "bucket_fill.mp3",
+            bucket_pour: this.SFX_DIR + "bucket_pour.mp3"
         };
 
         // sane defaults to prevent spammy stacking
