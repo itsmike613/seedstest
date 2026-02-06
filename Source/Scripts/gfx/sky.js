@@ -1,5 +1,3 @@
-// Source/Scripts/gfx/sky.js
-
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { now } from "../util/math.js";
 
@@ -14,9 +12,9 @@ export class Sky {
         const mat = new THREE.ShaderMaterial({
             side: THREE.BackSide,
             uniforms: {
-                top: { value: new THREE.Color(0x84c7ff) },
-                mid: { value: new THREE.Color(0x69b7ff) },
-                bot: { value: new THREE.Color(0xcfefff) },
+                top: { value: new THREE.Color(0x7ec7ff) },
+                mid: { value: new THREE.Color(0x77c6ff) },
+                bot: { value: new THREE.Color(0xf3f7ff) },
                 time: { value: 0 }
             },
             vertexShader: `
@@ -35,13 +33,14 @@ export class Sky {
 
         void main(){
           float h = normalize(vPos).y * 0.5 + 0.5;
-          float t1 = smoothstep(0.0, 0.55, h);
-          float t2 = smoothstep(0.45, 1.0, h);
+          float t1 = smoothstep(0.0, 0.58, h);
+          float t2 = smoothstep(0.42, 1.0, h);
 
           vec3 col = mix(bot, mid, t1);
           col = mix(col, top, t2);
 
-          float haze = 0.015 * sin(time * 0.25 + h * 9.0);
+          // softer “happy day” haze
+          float haze = 0.010 * sin(time * 0.20 + h * 8.0);
           col += haze;
 
           gl_FragColor = vec4(col, 1.0);
