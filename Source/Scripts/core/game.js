@@ -400,7 +400,6 @@ export class Game {
     }
 
     _footInterval() {
-        // sprint key drives cadence; also feel free to tune these numbers
         const sprint = (K["ControlLeft"] || K["ControlRight"]);
         return sprint ? 0.28 : 0.38;
     }
@@ -421,7 +420,6 @@ export class Game {
 
         const name = this._footNameUnderPlayer();
 
-        // footsteps are routed to the "foot" bus, so ducking is clean
         this.audio.playSfx(name, {
             bus: "foot",
             volume: 0.16,
@@ -560,9 +558,7 @@ export class Game {
         return this.hardness(id);
     }
 
-    // Returns true if a break sound played this frame (so we can suppress footsteps once).
     async mineTick(dt) {
-        // if not actively mining, release duck quickly and reset the hit timer
         if (!this.mine.on || this.open || !this.lock) {
             this.audio.setFootDuck(1.0, 0.03, 0.12);
             this.mine.hitT = 0;
@@ -578,7 +574,6 @@ export class Game {
             return false;
         }
 
-        // crop harvesting via mining
         if (h.y === Y1) {
             const ck = key(h.x, Y1, h.z);
             if (this.vox.crop.has(ck)) {
@@ -588,7 +583,7 @@ export class Game {
                 this.mine.t = 0;
                 this.mine.hitT = 0;
                 this.crack.hide();
-                return ok; // treat as "important sound happened"
+                return ok;
             }
         }
 
@@ -597,7 +592,6 @@ export class Game {
         if (!blocks[id].breakable) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
         if (h.x === INF.x && h.y === INF.y && h.z === INF.z) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
 
-        // valid mining target -> duck footsteps smoothly
         this.audio.setFootDuck(0.55, 0.03, 0.12);
 
         const same = (this.mine.k === id && this.mine.p.x === h.x && this.mine.p.y === h.y && this.mine.p.z === h.z);
@@ -606,13 +600,12 @@ export class Game {
             this.mine.p = { x: h.x, y: h.y, z: h.z };
             this.mine.t = 0;
             this.mine.need = this.speedFor(id);
-            this.mine.hitT = 0; // reset cadence when target changes
+            this.mine.hitT = 0;
         }
 
         this.mine.need = this.speedFor(id);
         this.mine.t += dt;
 
-        // controlled mining hit cadence (not every frame)
         this.mine.hitT = Math.max(0, this.mine.hitT - dt);
         if (this.mine.hitT <= 0) {
             this.audio.playSfx("mine_hit", {
@@ -621,7 +614,7 @@ export class Game {
                 cooldown: 0,
                 maxVoices: 1
             });
-            this.mine.hitT = 0.13; // ~7.7 hits/sec
+            this.mine.hitT = 0.13;
         }
 
         const prog = clamp(this.mine.t / this.mine.need, 0, 1);
@@ -631,15 +624,12 @@ export class Game {
         if (this.mine.t >= this.mine.need) {
             const res = await this.vox.breakBlock(h.x, h.y, h.z);
             if (res) {
-                // payoff sound louder than hit
                 this.audio.playSfx("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
             }
 
             this.mine.t = 0;
             this.mine.hitT = 0;
             this.crack.hide();
-
-            // suppress footstep this frame if an important sound happened
             return !!res;
         }
 
@@ -650,8 +640,10 @@ export class Game {
         this.fpa += dt; this.fpf++;
         if (this.fpa >= 0.25) { this.fps = Math.round(this.fpf / this.fpa); this.fpa = 0; this.fpf = 0; }
         if (this.tab) {
+            const radio = (this.audio && this.audio.getNowPlaying()) ? this.audio.getNowPlaying() : "Off";
             this.root.el.fps.textContent = `FPS: ${this.fps}`;
             this.root.el.pos.textContent = `XYZ: ${this.pl.p.x.toFixed(2)} ${this.pl.p.y.toFixed(2)} ${this.pl.p.z.toFixed(2)}`;
+            this.root.el.rad.textContent = `Radio: ${radio}`;
         }
     }
 

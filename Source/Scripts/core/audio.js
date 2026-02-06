@@ -23,7 +23,8 @@ export class AudioManager {
             tracks: [],
             i: 0,
             src: null,
-            gen: 0 // generation token to prevent overlap/races
+            gen: 0,            // generation token to prevent overlap/races
+            nowPlaying: ""     // display name for UI
         };
 
         this._footDuck = 1.0;
@@ -51,7 +52,6 @@ export class AudioManager {
             bucket_pour: this.SFX_DIR + "bucket_pour.mp3"
         };
 
-        // sane defaults to prevent spammy stacking
         this._defaultMaxVoices = {
             mine_hit: 1,
             mine_break: 2,
@@ -229,7 +229,6 @@ export class AudioManager {
         else this._activeVoices.set(k, n);
     }
 
-    // opts: volume, pitchRandom, cooldown, maxVoices, bus: "sfx" | "foot"
     async playSfx(nameOrUrl, opts = {}) {
         this._ensureCtx();
 
@@ -291,17 +290,30 @@ export class AudioManager {
         try { s.disconnect(); } catch { }
     }
 
+    _trackDisplayName(url) {
+        try {
+            const s = String(url || "");
+            const base = s.split("/").pop() || s;
+            const noQuery = base.split("?")[0];
+            const noExt = noQuery.replace(/\.[^/.]+$/, "");
+            return noExt || "Unknown";
+        } catch {
+            return "Unknown";
+        }
+    }
+
+    getNowPlaying() {
+        return this._music.nowPlaying || "";
+    }
+
     startMusicPlaylist(tracks = []) {
         this._ensureCtx();
-
-        // invalidate any in-flight async starts + stop current source
         this._music.gen++;
         this._stopCurrentMusicSource();
-
         this._music.tracks = tracks.map(t => this._resolveMusicUrl(t)).filter(Boolean);
         this._music.i = 0;
         this._music.on = true;
-
+        this._music.nowPlaying = this._music.tracks.length ? this._trackDisplayName(this._music.tracks[0]) : "";
         this._startNextTrack(this._music.gen);
     }
 
@@ -310,21 +322,19 @@ export class AudioManager {
         this._music.on = false;
         this._music.tracks = [];
         this._music.i = 0;
-
         this._music.gen++;
         this._stopCurrentMusicSource();
+        this._music.nowPlaying = "";
     }
 
     async _startNextTrack(gen) {
         if (!this._music.on) return;
         if (gen !== this._music.gen) return;
         if (!this._music.tracks.length) return;
-
         this._stopCurrentMusicSource();
-
         const url = this._music.tracks[this._music.i % this._music.tracks.length];
         this._music.i++;
-
+        this._music.nowPlaying = this._trackDisplayName(url);
         let buf;
         try {
             buf = await this._loadBuffer(url);
@@ -332,23 +342,17 @@ export class AudioManager {
             if (this._music.on && gen === this._music.gen) this._startNextTrack(gen);
             return;
         }
-
         if (!this._music.on) return;
         if (gen !== this._music.gen) return;
-
         const src = this.ctx.createBufferSource();
         src.buffer = buf;
-
         src.connect(this.musicGain);
-
         src.onended = () => {
             if (!this._music.on) return;
             if (gen !== this._music.gen) return;
             this._startNextTrack(gen);
         };
-
         this._music.src = src;
-
         try { src.start(); } catch { /* ignore */ }
     }
 }

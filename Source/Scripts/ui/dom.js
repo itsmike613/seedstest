@@ -11,6 +11,7 @@ export const root = {
         tab: document.getElementById("tab"),
         fps: document.getElementById("fps"),
         pos: document.getElementById("pos"),
+        rad: document.getElementById("rad"),
         msg: document.getElementById("msg"),
     }
 };
