@@ -1,7 +1,5 @@
 // Source/Scripts/world/world.js
 
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-
 import { conf } from "../config/conf.js";
 import { W, H, Y0, Y1, INF, YB } from "../config/constants.js";
 import { blocks } from "../data/blocks.js";
