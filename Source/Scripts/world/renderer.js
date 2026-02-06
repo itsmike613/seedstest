@@ -11,14 +11,11 @@ export class VoxRenderer {
     constructor(scene, tex) {
         this.s = scene;
         this.t = tex;
-
         this.g = new THREE.BoxGeometry(1, 1, 1);
         this.mats = new Map();
-        this.mesh = new Map();      // block meshes only
-        this.water = new Set();     // keys for water blocks (for UV flow)
-
-        // crop visuals
-        this.cropPlanes = new Map(); // baseKey => {planes, center, seed}
+        this.mesh = new Map();
+        this.water = new Set();
+        this.cropPlanes = new Map();
     }
 
     async mat(url, idHint = "") {
@@ -91,7 +88,7 @@ export class VoxRenderer {
 
     async setCropPlanes(x, y, z, type, st) {
         const base = key(x, y, z) + "|crop";
-        // clear old
+
         for (let i = 0; i < 4; i++) {
             const kk = base + i;
             if (this.mesh.has(kk)) { this.s.remove(this.mesh.get(kk)); this.mesh.delete(kk); }
@@ -110,26 +107,33 @@ export class VoxRenderer {
         });
 
         const g = new THREE.PlaneGeometry(1, 1);
-        const p = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
-        const rots = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+        const center = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
+        const off = 0.22;
 
         const planes = [];
+        const bases = [];
+
         for (let i = 0; i < 4; i++) {
             const mesh = new THREE.Mesh(g, m);
-            mesh.position.copy(p);
-            mesh.rotation.y = rots[i];
-            mesh.scale.set(0.95, 0.95, 0.95);
+            const rot = i * (Math.PI * 0.5);
+            mesh.rotation.y = rot;
+            const nx = Math.sin(rot);
+            const nz = Math.cos(rot);
+            mesh.position.set(center.x + nx * off, center.y, center.z + nz * off);
+            mesh.scale.set(0.85, 0.95, 0.85);
             mesh.castShadow = true;
             mesh.receiveShadow = false;
-
             this.s.add(mesh);
-            this.mesh.set(base + i, mesh); // note: these are not BoxGeometry, so raycast filter ignores them
+            this.mesh.set(base + i, mesh);
             planes.push(mesh);
+            bases.push(mesh.position.clone());
         }
 
         this.cropPlanes.set(base, {
             planes,
-            center: p.clone(),
+            bases,
+            center: center.clone(),
+            off,
             seed: (x * 37.1 + z * 91.7 + (type === "wheat" ? 11.3 : 23.7)) * 0.1
         });
     }
@@ -154,13 +158,12 @@ export class VoxRenderer {
 
             for (let i = 0; i < d.planes.length; i++) {
                 const m = d.planes[i];
-                m.position.copy(d.center);
+                m.position.copy(d.bases[i]);
                 m.rotation.z = 0;
                 m.rotation.x = 0;
-
                 m.rotation.x = (i % 2 === 0 ? sway : -sway) * 0.35;
                 m.rotation.z = (i % 2 === 0 ? sway2 : -sway2) * 0.35;
-                m.position.y = d.center.y + 0.02 * Math.sin(t * 2.2 + d.seed + i);
+                m.position.y = d.bases[i].y + 0.02 * Math.sin(t * 2.2 + d.seed + i);
             }
         }
 
