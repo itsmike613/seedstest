@@ -22,58 +22,30 @@ export class VoxRenderer {
     }
 
     async mat(url, idHint = "") {
-        const mk = url + "|pbr|" + idHint;
+        const mk = url + "|std|" + idHint;
         if (this.mats.has(mk)) return this.mats.get(mk);
 
         const tx = await this.t.get(url);
 
-        const baseEnv = {
-            envMapIntensity: 0.65
-        };
-
         let m;
-
         if (idHint === "water") {
             tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
             tx.repeat.set(1, 1);
-
-            m = new THREE.MeshPhysicalMaterial({
-                map: tx,
-                transparent: true,
-                opacity: 0.86,
-
-                roughness: 0.10,
-                metalness: 0.0,
-
-                clearcoat: 0.85,
-                clearcoatRoughness: 0.12,
-
-                transmission: 0.25,
-                ior: 1.33,
-                thickness: 0.2,
-
-                emissive: new THREE.Color(0x0b1c2a),
-                emissiveIntensity: 0.22,
-
-                ...baseEnv,
-                envMapIntensity: 1.15
-            });
-        } else {
-            let rough = 0.92;
-            let envI = 0.65;
-
-            if (idHint === "path") { rough = 0.78; envI = 0.85; }
-            if (idHint === "dirt") { rough = 0.95; envI = 0.55; }
-            if (idHint === "tilled_wet") { rough = 0.68; envI = 1.05; }
-            if (idHint === "tilled_dry") { rough = 0.88; envI = 0.70; }
-            if (idHint === "grass") { rough = 0.90; envI = 0.65; }
-
             m = new THREE.MeshStandardMaterial({
                 map: tx,
                 transparent: true,
-                roughness: rough,
+                opacity: 0.85,
+                roughness: 0.18,
                 metalness: 0.0,
-                envMapIntensity: envI
+                emissive: new THREE.Color(0x112244),
+                emissiveIntensity: 0.15
+            });
+        } else {
+            m = new THREE.MeshStandardMaterial({
+                map: tx,
+                transparent: true,
+                roughness: 0.9,
+                metalness: 0.0
             });
         }
 
@@ -134,9 +106,7 @@ export class VoxRenderer {
             map: tx,
             transparent: true,
             depthWrite: false,
-            side: THREE.DoubleSide,
-            emissive: new THREE.Color(0x1a2a12),
-            emissiveIntensity: 0.12
+            side: THREE.DoubleSide
         });
 
         const g = new THREE.PlaneGeometry(1, 1);
@@ -153,7 +123,7 @@ export class VoxRenderer {
             mesh.receiveShadow = false;
 
             this.s.add(mesh);
-            this.mesh.set(base + i, mesh);
+            this.mesh.set(base + i, mesh); // note: these are not BoxGeometry, so raycast filter ignores them
             planes.push(mesh);
         }
 

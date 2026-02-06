@@ -30,37 +30,26 @@ export class Game {
         this.conf = conf;
 
         // --- three ---
-        this.ren = new THREE.WebGLRenderer({
-            canvas: this.root.el.c,
-            antialias: true,
-            alpha: false,
-            powerPreference: "high-performance"
-        });
-
+        this.ren = new THREE.WebGLRenderer({ canvas: this.root.el.c, antialias: true });
         this.ren.setPixelRatio(Math.min(devicePixelRatio, 2));
         this.ren.setSize(innerWidth, innerHeight, false);
 
         this.ren.outputColorSpace = THREE.SRGBColorSpace;
-
-        // Warm, filmic look
         this.ren.toneMapping = THREE.ACESFilmicToneMapping;
-        this.ren.toneMappingExposure = 1.12;
+        this.ren.toneMappingExposure = 1.08;
 
-        // Shadows
         this.ren.shadowMap.enabled = true;
         this.ren.shadowMap.type = THREE.PCFSoftShadowMap;
 
-        // Scene
-        this.scene = new THREE.Scene();
+        this.ren.setClearColor(0x69b7ff, 1);
 
-        // Warm fog + clear color
-        this.scene.fog = new THREE.Fog(0x77c6ff, 22, 62);
-        this.ren.setClearColor(0x77c6ff, 1);
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.Fog(0x69b7ff, 22, 62);
 
         this.cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 200);
 
         // --- lighting ---
-        this.sun = new THREE.DirectionalLight(0xfff0dd, 1.05);
+        this.sun = new THREE.DirectionalLight(0xffffff, 1.05);
         this.sun.position.set(10, 18, 8);
         this.sun.castShadow = true;
         this.sun.shadow.mapSize.set(1024, 1024);
@@ -73,13 +62,9 @@ export class Game {
         this.sun.shadow.bias = -0.00035;
         this.scene.add(this.sun);
 
-        this.hemi = new THREE.HemisphereLight(0xdff6ff, 0x4a463d, 0.62);
+        this.hemi = new THREE.HemisphereLight(0xcfefff, 0x3b3f4a, 0.55);
         this.scene.add(this.hemi);
-
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.18));
-
-        // --- environment reflections ---
-        this.scene.environment = this._makeWarmEnvMap();
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.20));
 
         // --- sky ---
         this.sky = new Sky(this.scene);
@@ -91,6 +76,7 @@ export class Game {
         // --- audio ---
         this.audio = new AudioManager();
 
+        // pickup sound only when pickup succeeds and item is removed
         this.vox.setOnPickup(() => {
             this.audio.playSfx("pickup", {
                 volume: 0.65,
@@ -118,6 +104,7 @@ export class Game {
         this.open = false;
         this.tab = false;
 
+        // mining state
         this.mine = {
             on: false,
             k: "",
@@ -127,6 +114,7 @@ export class Game {
             hitT: 0
         };
 
+        // footsteps state (timed steps)
         this._foot = { t: 0 };
 
         // --- raycast ---
@@ -148,53 +136,13 @@ export class Game {
         this.loop = this.loop.bind(this);
     }
 
-    _makeWarmEnvMap() {
-        const pmrem = new THREE.PMREMGenerator(this.ren);
-        pmrem.compileCubemapShader();
-
-        const envScene = new THREE.Scene();
-
-        envScene.add(new THREE.HemisphereLight(0xfff2dd, 0x5a523f, 1.0));
-
-        const dl = new THREE.DirectionalLight(0xfff0d8, 0.9);
-        dl.position.set(2, 3, 1);
-        envScene.add(dl);
-
-        const boxG = new THREE.BoxGeometry(10, 10, 10);
-        const boxM = new THREE.MeshBasicMaterial({ color: 0x87cfff, side: THREE.BackSide });
-        const box = new THREE.Mesh(boxG, boxM);
-        envScene.add(box);
-
-        const warmCardG = new THREE.PlaneGeometry(6, 6);
-        const warmCardM = new THREE.MeshBasicMaterial({ color: 0xffe2b8, side: THREE.DoubleSide });
-        const warmCard = new THREE.Mesh(warmCardG, warmCardM);
-        warmCard.position.set(0, 1.5, -2.5);
-        envScene.add(warmCard);
-
-        const greenCardM = new THREE.MeshBasicMaterial({ color: 0xbfe7b4, side: THREE.DoubleSide });
-        const greenCard = new THREE.Mesh(warmCardG, greenCardM);
-        greenCard.position.set(-2.8, 0.8, 0.5);
-        greenCard.rotation.y = Math.PI * 0.35;
-        envScene.add(greenCard);
-
-        const sunG = new THREE.SphereGeometry(0.25, 16, 16);
-        const sunM = new THREE.MeshBasicMaterial({ color: 0xfff7e6 });
-        const sun = new THREE.Mesh(sunG, sunM);
-        sun.position.set(1.8, 2.2, 1.2);
-        envScene.add(sun);
-
-        const env = pmrem.fromScene(envScene, 0.04).texture;
-        pmrem.dispose();
-
-        return env;
-    }
-
     seedInitialHotbar() {
         this.bag.hot[0] = { k: "hoe_wood", c: 1 };
         this.bag.hot[1] = { k: "shovel_wood", c: 1 };
         this.bag.hot[2] = { k: "bucket_empty", c: 1 };
         this.bag.hot[3] = { k: "seed_wheat", c: 3 };
         this.bag.hot[4] = { k: "seed_carrot", c: 3 };
+
         this.bag.hot[5] = { k: "seed_blueberry", c: 3 };
         this.bag.hot[6] = { k: "seed_raspberry", c: 3 };
     }
@@ -213,7 +161,9 @@ export class Game {
         return new THREE.Vector3(cx, cy, cz).normalize();
     }
 
-    clampPitch() { this.pl.pit = clamp(this.pl.pit, -1.45, 1.45); }
+    clampPitch() {
+        this.pl.pit = clamp(this.pl.pit, -1.45, 1.45);
+    }
 
     camSync() {
         this.cam.position.copy(this.pl.p);
@@ -340,6 +290,7 @@ export class Game {
             return this.vox.topAt(bx, bz);
         };
 
+        // --- vertical ---
         this.pl.p.y += this.pl.v.y * dt;
 
         const cx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
@@ -449,6 +400,7 @@ export class Game {
     }
 
     _footInterval() {
+        // sprint key drives cadence; also feel free to tune these numbers
         const sprint = (K["ControlLeft"] || K["ControlRight"]);
         return sprint ? 0.28 : 0.38;
     }
@@ -469,6 +421,7 @@ export class Game {
 
         const name = this._footNameUnderPlayer();
 
+        // footsteps are routed to the "foot" bus, so ducking is clean
         this.audio.playSfx(name, {
             bus: "foot",
             volume: 0.16,
@@ -502,8 +455,11 @@ export class Game {
         if (s.k === "hoe_wood") {
             if (h.y === Y1) {
                 const ok = await this.vox.till(h.x, h.z);
-                if (ok) this.audio.playSfx("hoe", { volume: 0.8, pitchRandom: 0.06, cooldown: 0.03 });
-                else this.msg("Needs water within 5");
+                if (ok) {
+                    this.audio.playSfx("hoe", { volume: 0.8, pitchRandom: 0.06, cooldown: 0.03 });
+                } else {
+                    this.msg("Needs water within 5");
+                }
             }
             return;
         }
@@ -604,7 +560,9 @@ export class Game {
         return this.hardness(id);
     }
 
+    // Returns true if a break sound played this frame (so we can suppress footsteps once).
     async mineTick(dt) {
+        // if not actively mining, release duck quickly and reset the hit timer
         if (!this.mine.on || this.open || !this.lock) {
             this.audio.setFootDuck(1.0, 0.03, 0.12);
             this.mine.hitT = 0;
@@ -620,6 +578,7 @@ export class Game {
             return false;
         }
 
+        // crop harvesting via mining
         if (h.y === Y1) {
             const ck = key(h.x, Y1, h.z);
             if (this.vox.crop.has(ck)) {
@@ -629,7 +588,7 @@ export class Game {
                 this.mine.t = 0;
                 this.mine.hitT = 0;
                 this.crack.hide();
-                return ok;
+                return ok; // treat as "important sound happened"
             }
         }
 
@@ -638,6 +597,7 @@ export class Game {
         if (!blocks[id].breakable) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
         if (h.x === INF.x && h.y === INF.y && h.z === INF.z) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
 
+        // valid mining target -> duck footsteps smoothly
         this.audio.setFootDuck(0.55, 0.03, 0.12);
 
         const same = (this.mine.k === id && this.mine.p.x === h.x && this.mine.p.y === h.y && this.mine.p.z === h.z);
@@ -646,16 +606,22 @@ export class Game {
             this.mine.p = { x: h.x, y: h.y, z: h.z };
             this.mine.t = 0;
             this.mine.need = this.speedFor(id);
-            this.mine.hitT = 0;
+            this.mine.hitT = 0; // reset cadence when target changes
         }
 
         this.mine.need = this.speedFor(id);
         this.mine.t += dt;
 
+        // controlled mining hit cadence (not every frame)
         this.mine.hitT = Math.max(0, this.mine.hitT - dt);
         if (this.mine.hitT <= 0) {
-            this.audio.playSfx("mine_hit", { volume: 0.42, pitchRandom: 0.08, cooldown: 0, maxVoices: 1 });
-            this.mine.hitT = 0.13;
+            this.audio.playSfx("mine_hit", {
+                volume: 0.42,
+                pitchRandom: 0.08,
+                cooldown: 0,
+                maxVoices: 1
+            });
+            this.mine.hitT = 0.13; // ~7.7 hits/sec
         }
 
         const prog = clamp(this.mine.t / this.mine.need, 0, 1);
@@ -664,10 +630,16 @@ export class Game {
 
         if (this.mine.t >= this.mine.need) {
             const res = await this.vox.breakBlock(h.x, h.y, h.z);
-            if (res) this.audio.playSfx("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
+            if (res) {
+                // payoff sound louder than hit
+                this.audio.playSfx("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
+            }
+
             this.mine.t = 0;
             this.mine.hitT = 0;
             this.crack.hide();
+
+            // suppress footstep this frame if an important sound happened
             return !!res;
         }
 
