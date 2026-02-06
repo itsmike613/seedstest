@@ -1,3 +1,5 @@
+// Source/Scripts/core/game.js
+
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 import { conf } from "../config/conf.js";
@@ -10,7 +12,6 @@ import { blocks } from "../data/blocks.js";
 
 import { Bag } from "../inventory/bag.js";
 import { UI } from "../ui/ui.js";
-import { Shop } from "../ui/shop.js";
 
 import { Tex } from "../gfx/tex.js";
 import { Sky } from "../gfx/sky.js";
@@ -22,8 +23,6 @@ import { raycastBlock } from "./raycast.js";
 import { K, installInput } from "./input.js";
 
 import { AudioManager } from "./audio.js";
-
-import { Npc } from "../world/npc.js";
 
 export class Game {
     constructor(root) {
@@ -100,10 +99,6 @@ export class Game {
         this.bag = new Bag();
         this.seedInitialHotbar();
 
-        // --- shop / currency ---
-        this.coins = 50;
-        this.shopOpen = false;
-
         // --- state ---
         this.lock = false;
         this.open = false;
@@ -132,10 +127,6 @@ export class Game {
 
         // --- UI ---
         this.ui = new UI(this.root.el, this.bag, (e) => this.slotDown(e));
-        this.shop = new Shop(this.root.el, this.bag, (t) => this.msg(t));
-
-        // NPC
-        this.npc = null;
 
         // --- fps ---
         this.fpa = 0; this.fpf = 0; this.fps = 0;
@@ -143,19 +134,6 @@ export class Game {
         // --- loop timing ---
         this.last = performance.now();
         this.loop = this.loop.bind(this);
-
-        window.addEventListener("keydown", (e) => {
-            if (e.code !== "Escape") return;
-            if (this.shopOpen) {
-                e.preventDefault();
-                this.setShopOpen(false);
-                return;
-            }
-            if (this.open) {
-                e.preventDefault();
-                this.setOpen(false);
-            }
-        }, { capture: true });
     }
 
     seedInitialHotbar() {
@@ -195,31 +173,15 @@ export class Game {
     }
 
     prevent(e) {
-        if (this.lock || this.open || this.shopOpen) {
+        if (this.lock || this.open) {
             if (e.code === "Space" || e.code === "Tab" || e.ctrlKey || e.metaKey || e.altKey) e.preventDefault();
         }
     }
 
     setOpen(v) {
-        if (v && this.shopOpen) this.setShopOpen(false);
-
         this.open = v;
         this.ui.setOpen(v);
         if (this.open) {
-            if (document.pointerLockElement) document.exitPointerLock();
-        } else {
-            this.root.el.c.requestPointerLock();
-        }
-    }
-
-    setShopOpen(v) {
-        if (v && this.open) return;
-
-        this.shopOpen = v;
-        this.shop.setCoins(this.coins);
-        this.shop.setOpen(v);
-
-        if (this.shopOpen) {
             if (document.pointerLockElement) document.exitPointerLock();
         } else {
             this.root.el.c.requestPointerLock();
@@ -427,15 +389,6 @@ export class Game {
         });
     }
 
-    hitNpc() {
-        if (!this.npc) return null;
-        this.ray.far = conf.reach;
-        this.ray.set(this.cam.position, this.facing());
-        const hits = this.ray.intersectObject(this.npc.hitbox, false);
-        if (!hits || hits.length === 0) return null;
-        return hits[0];
-    }
-
     _footNameUnderPlayer() {
         const bx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
         const bz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
@@ -447,6 +400,7 @@ export class Game {
     }
 
     _footInterval() {
+        // sprint key drives cadence; also feel free to tune these numbers
         const sprint = (K["ControlLeft"] || K["ControlRight"]);
         return sprint ? 0.28 : 0.38;
     }
@@ -456,7 +410,7 @@ export class Game {
         if (suppressThisFrame) return;
 
         const sp = Math.hypot(this.pl.v.x, this.pl.v.z);
-        const moving = this.lock && !this.open && !this.shopOpen && this.pl.on && sp > 0.35;
+        const moving = this.lock && !this.open && this.pl.on && sp > 0.35;
 
         if (!moving) {
             this._foot.t = 0;
@@ -467,6 +421,7 @@ export class Game {
 
         const name = this._footNameUnderPlayer();
 
+        // footsteps are routed to the "foot" bus, so ducking is clean
         this.audio.playSfx(name, {
             bus: "foot",
             volume: 0.16,
@@ -479,14 +434,6 @@ export class Game {
     }
 
     async use() {
-        if (!this.open && !this.shopOpen) {
-            const nh = this.hitNpc();
-            if (nh) {
-                this.setShopOpen(true);
-                return;
-            }
-        }
-
         const h = await this.hit();
         if (!h) return;
 
@@ -505,11 +452,8 @@ export class Game {
 
         const held = items[s.k];
 
-        const underNpc = (h.y === Y1 && this.npc && h.x === this.npc.block.x && h.z === this.npc.block.z);
-
         if (s.k === "hoe_wood") {
             if (h.y === Y1) {
-                if (underNpc) return;
                 const ok = await this.vox.till(h.x, h.z);
                 if (ok) {
                     this.audio.playSfx("hoe", { volume: 0.8, pitchRandom: 0.06, cooldown: 0.03 });
@@ -522,7 +466,6 @@ export class Game {
 
         if (s.k === "shovel_wood") {
             if (h.y === Y1) {
-                if (underNpc) return;
                 const id = this.vox.get(h.x, h.y, h.z);
                 if (id === "grass") {
                     await this.vox.set(h.x, h.y, h.z, "path");
@@ -617,8 +560,10 @@ export class Game {
         return this.hardness(id);
     }
 
+    // Returns true if a break sound played this frame (so we can suppress footsteps once).
     async mineTick(dt) {
-        if (!this.mine.on || this.open || this.shopOpen || !this.lock) {
+        // if not actively mining, release duck quickly and reset the hit timer
+        if (!this.mine.on || this.open || !this.lock) {
             this.audio.setFootDuck(1.0, 0.03, 0.12);
             this.mine.hitT = 0;
             return false;
@@ -633,6 +578,7 @@ export class Game {
             return false;
         }
 
+        // crop harvesting via mining
         if (h.y === Y1) {
             const ck = key(h.x, Y1, h.z);
             if (this.vox.crop.has(ck)) {
@@ -642,7 +588,7 @@ export class Game {
                 this.mine.t = 0;
                 this.mine.hitT = 0;
                 this.crack.hide();
-                return ok;
+                return ok; // treat as "important sound happened"
             }
         }
 
@@ -651,6 +597,7 @@ export class Game {
         if (!blocks[id].breakable) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
         if (h.x === INF.x && h.y === INF.y && h.z === INF.z) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
 
+        // valid mining target -> duck footsteps smoothly
         this.audio.setFootDuck(0.55, 0.03, 0.12);
 
         const same = (this.mine.k === id && this.mine.p.x === h.x && this.mine.p.y === h.y && this.mine.p.z === h.z);
@@ -659,12 +606,13 @@ export class Game {
             this.mine.p = { x: h.x, y: h.y, z: h.z };
             this.mine.t = 0;
             this.mine.need = this.speedFor(id);
-            this.mine.hitT = 0;
+            this.mine.hitT = 0; // reset cadence when target changes
         }
 
         this.mine.need = this.speedFor(id);
         this.mine.t += dt;
 
+        // controlled mining hit cadence (not every frame)
         this.mine.hitT = Math.max(0, this.mine.hitT - dt);
         if (this.mine.hitT <= 0) {
             this.audio.playSfx("mine_hit", {
@@ -673,7 +621,7 @@ export class Game {
                 cooldown: 0,
                 maxVoices: 1
             });
-            this.mine.hitT = 0.13;
+            this.mine.hitT = 0.13; // ~7.7 hits/sec
         }
 
         const prog = clamp(this.mine.t / this.mine.need, 0, 1);
@@ -683,12 +631,15 @@ export class Game {
         if (this.mine.t >= this.mine.need) {
             const res = await this.vox.breakBlock(h.x, h.y, h.z);
             if (res) {
+                // payoff sound louder than hit
                 this.audio.playSfx("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
             }
 
             this.mine.t = 0;
             this.mine.hitT = 0;
             this.crack.hide();
+
+            // suppress footstep this frame if an important sound happened
             return !!res;
         }
 
@@ -709,7 +660,7 @@ export class Game {
         const dt = Math.min(0.033, (t - this.last) / 1000);
         this.last = t;
 
-        if (this.lock && !this.open && !this.shopOpen) {
+        if (this.lock && !this.open) {
             this.ctrl(dt);
             this.collide(dt);
         } else {
@@ -730,19 +681,12 @@ export class Game {
 
         this.vox.partsTick(dt, this.cam);
 
-        if (this.npc) this.npc.tick(this.cam, this.pl.p, dt);
-
         this.holo.tick(this.cam);
         this.tabTick(dt);
 
         await this._footTick(dt, suppressStep);
 
         this.ui.draw();
-
-        if (this.shopOpen) {
-            this.coins = this.shop.coins;
-        }
-
         this.ren.render(this.scene, this.cam);
 
         requestAnimationFrame(this.loop);
@@ -750,8 +694,6 @@ export class Game {
 
     async start() {
         this.ui.build();
-        this.shop.build();
-
         installInput(this);
 
         this.sky.init();
@@ -759,16 +701,6 @@ export class Game {
         await this.crack.init();
         await this.vox.init();
         await this.holo.init();
-
-        const npcBlock = { x: INF.x + 1, y: Y1, z: INF.z };
-        this.npc = new Npc({
-            scene: this.scene,
-            tex: this.tex,
-            skinUrl: "./Source/Assets/NPC/farmer.png",
-            blockPos: npcBlock
-        });
-        this.npc.setSkin("./Source/Assets/NPC/farmer.png");
-        await this.npc.init();
 
         this.pl.p.set(1.35, 2.65, 1.35);
 
