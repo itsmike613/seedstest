@@ -25,6 +25,9 @@ export class Vox {
 
         this.bush = new Map();
 
+        this._hydration = new Uint8Array(W * H);
+        this._hydrationDirty = true;
+
         this.renderer = new VoxRenderer(scene, tex);
 
         // pickup callback is set later by Game via setOnPickup()
@@ -34,30 +37,28 @@ export class Vox {
             if (this._onPickup) this._onPickup();
         });
 
-        this.parts = new ParticleSystem(scene);
+        this.parts = new ParticleSystem(scene, tex);
     }
 
-    setOnPickup(fn) {
-        this._onPickup = fn;
+    setOnPickup(fn) { this._onPickup = fn; }
+
+    inPad(x, z) {
+        return x >= 0 && x < W && z >= 0 && z < H;
     }
 
-    get mesh() { return this.renderer.mesh; }
-
-    inPad(x, z) { return x >= 0 && z >= 0 && x < W && z < H; }
-    get(x, y, z) { return this.map.get(key(x, y, z)); }
-
-    topAt(x, z) {
-        const t = this.get(x, Y1, z);
-        if (!t) return Y0 + 1;
-        if (t === "water") return Y1 + 0.85;
-        if (t === "path") return Y1 + 0.90;
-        return Y1 + 1;
+    get(x, y, z) {
+        if (!this.inPad(x, z)) return null;
+        return this.map.get(key(x, y, z));
     }
 
     async set(x, y, z, id) {
         const k = key(x, y, z);
         const prev = this.map.get(k);
         if (prev === id) return;
+
+        if (y === Y1 && (prev === "water" || id === "water")) {
+            this._hydrationDirty = true;
+        }
 
         if (!id) this.map.delete(k);
         else this.map.set(k, id);
@@ -73,19 +74,48 @@ export class Vox {
             }
         }
         await this.set(INF.x, INF.y, INF.z, "water");
+        this._recomputeHydration();
+    }
+
+    _hidx(x, z) { return x * H + z; }
+
+    _recomputeHydration() {
+        this._hydration.fill(0);
+
+        const water = [];
+        for (const [k, id] of this.map) {
+            if (id !== "water") continue;
+            const p = parse(k);
+            if (p.y !== Y1) continue;
+            water.push({ x: p.x, z: p.z });
+        }
+        if (!water.length) { this._hydrationDirty = false; return; }
+
+        const r = conf.hyd;
+        const r2 = r * r;
+
+        for (let x = 0; x < W; x++) {
+            for (let z = 0; z < H; z++) {
+                if (!this.inPad(x, z)) continue;
+
+                let wet = false;
+                for (let i = 0; i < water.length && !wet; i++) {
+                    const dx0 = water[i].x - x;
+                    const dz0 = water[i].z - z;
+                    if (dx0 > r || dx0 < -r || dz0 > r || dz0 < -r) continue;
+                    if ((dx0 * dx0 + dz0 * dz0) <= r2) wet = true;
+                }
+                if (wet) this._hydration[this._hidx(x, z)] = 1;
+            }
+        }
+
+        this._hydrationDirty = false;
     }
 
     nearWater(x, z) {
-        for (let dx = -conf.hyd; dx <= conf.hyd; dx++) {
-            for (let dz = -conf.hyd; dz <= conf.hyd; dz++) {
-                const nx = x + dx, nz = z + dz;
-                if (!this.inPad(nx, nz)) continue;
-                if (this.get(nx, Y1, nz) === "water") {
-                    if (Math.sqrt(dx * dx + dz * dz) <= conf.hyd) return true;
-                }
-            }
-        }
-        return false;
+        if (!this.inPad(x, z)) return false;
+        if (this._hydrationDirty) this._recomputeHydration();
+        return this._hydration[this._hidx(x, z)] === 1;
     }
 
     async till(x, z) {
@@ -95,136 +125,57 @@ export class Vox {
 
         if (this.bush.has(key(x, YB, z))) return false;
 
-        await this.set(x, Y1, z, "tilled_dry");
-        this.tilled.set(key(x, Y1, z), { wet: false, ts: now() });
+        const k = key(x, Y1, z);
+        this.tilled.set(k, { wet: true, ts: now() });
+
+        await this.set(x, Y1, z, "tilled_wet");
         return true;
     }
 
-    async plant(x, z, type) {
-        const id = this.get(x, Y1, z);
-        if (id !== "tilled_dry" && id !== "tilled_wet") return false;
-
+    async unTill(x, z) {
         const k = key(x, Y1, z);
+        if (!this.tilled.has(k)) return false;
         if (this.crop.has(k)) return false;
 
+        this.tilled.delete(k);
+        await this.set(x, Y1, z, "dirt");
+        this.regrowLater(x, Y1, z);
+        return true;
+    }
+
+    async water(x, z) {
+        const id = this.get(x, Y1, z);
+        if (id !== "tilled_dry") return false;
+
+        const k = key(x, Y1, z);
+        const t = this.tilled.get(k);
+        t.wet = true;
+        t.ts = now();
+
+        await this.set(x, Y1, z, "tilled_wet");
+        return true;
+    }
+
+    async unWater(x, z) {
+        const id = this.get(x, Y1, z);
+        if (id !== "water") return false;
+
+        await this.set(x, Y1, z, "grass");
+        this.regrowLater(x, Y1, z);
+        return true;
+    }
+
+    async placeWater(x, z) {
+        const id = this.get(x, Y1, z);
+        if (id !== "grass" && id !== "dirt") return false;
         if (this.bush.has(key(x, YB, z))) return false;
 
-        this.crop.set(k, { type, st: 0, ts: now() });
-        await this.renderer.setCropPlanes(x, Y1, z, type, 0);
-        return true;
-    }
-
-    killCrop(x, z) {
-        const k = key(x, Y1, z);
-        this.crop.delete(k);
-        this.renderer.removeCropPlanes(x, Y1, z);
-    }
-
-    // -----------------------------
-    // Bush helpers
-    // -----------------------------
-    isBushId(id) {
-        return id === "blueberry_bush_empty" || id === "blueberry_bush_full" ||
-               id === "raspberry_bush_empty" || id === "raspberry_bush_full";
-    }
-
-    bushAt(x, y, z) {
-        // bushes always live at YB; allow callers to pass any y
-        return this.bush.get(key(x, YB, z)) || null;
-    }
-
-    async setBushVisual(x, z, full) {
-        const k = key(x, YB, z);
-        const b = this.bush.get(k);
-        if (!b) return;
-
-        const def = crops[b.type];
-        const id = full ? def.bush.full : def.bush.empty;
-
-        b.full = full;
-        b.ts = now();
-
-        await this.set(x, YB, z, id);
-    }
-
-    async convertCropToBush(x, z, type) {
-        const def = crops[type];
-        if (!def || !def.bush) return;
-
-        this.crop.delete(key(x, Y1, z));
-        this.renderer.removeCropPlanes(x, Y1, z);
-
-        await this.set(x, YB, z, def.bush.empty);
-        this.bush.set(key(x, YB, z), { type, full: false, ts: now() });
-    }
-
-    async useBush(x, z) {
-        const b = this.bush.get(key(x, YB, z));
-        if (!b) return { ok: false, why: "not_bush" };
-        if (!b.full) return { ok: false, why: "not_ready" };
-
-        const def = crops[b.type];
-        const drop = def.bush.berry;
-
-        this.items.spawn(drop.item, new THREE.Vector3(x + 0.5, YB + 0.25, z + 0.5), rnd(drop.min, drop.max));
-        this.parts.burst(x, YB, z);
-
-        await this.setBushVisual(x, z, false);
-        return { ok: true, why: "harvested" };
-    }
-
-    async breakBush(x, z) {
-        const k = key(x, YB, z);
-        const b = this.bush.get(k);
-        if (!b) return false;
-
-        const def = crops[b.type];
-
-        this.items.spawn(def.seed, new THREE.Vector3(x + 0.5, YB + 0.25, z + 0.5), 1);
-
-        if (b.full) {
-            const drop = def.bush.berry;
-            this.items.spawn(drop.item, new THREE.Vector3(x + 0.5, YB + 0.25, z + 0.5), rnd(drop.min, drop.max));
-        }
-
-        this.bush.delete(k);
-        await this.set(x, YB, z, null);
-        this.parts.burst(x, YB, z);
-        return true;
-    }
-
-    async dropCrop(x, y, z, type, popped) {
-        const c = crops[type];
-        const k = key(x, Y1, z);
-        const cur = this.crop.get(k);
-        const st = cur ? cur.st : (c.stages.length - 1);
-        const max = c.stages.length - 1;
-
-        if (popped) {
-            this.items.spawn(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
-            return;
-        }
-
-        if (st >= max) {
-            this.items.spawn(c.drop.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), rnd(c.drop.min, c.drop.max));
-            const b = rnd(c.bonus.min, c.bonus.max);
-            if (b > 0) this.items.spawn(c.bonus.item, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), b);
-        } else {
-            this.items.spawn(c.seed, new THREE.Vector3(x + 0.5, y + 1.35, z + 0.5), 1);
-        }
-        this.parts.burst(x, y, z);
-    }
-
-    async breakCrop(x, z) {
-        const k = key(x, Y1, z);
-        if (!this.crop.has(k)) return false;
-        const c = this.crop.get(k);
-        await this.dropCrop(x, Y1, z, c.type, false);
-        this.killCrop(x, z);
+        await this.set(x, Y1, z, "water");
         return true;
     }
 
     async hydrateTick() {
+        if (this._hydrationDirty) this._recomputeHydration();
         const t = now();
         for (const [k, v] of this.tilled) {
             const p = parse(k);
