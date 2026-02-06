@@ -1,0 +1,107 @@
+#shop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, .20);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#shopPane {
+    width: min(640px, 92vw);
+    background: var(--bg2);
+    border: 1px solid var(--bd);
+    border-radius: 14px;
+    padding: 16px;
+    backdrop-filter: blur(3px);
+}
+
+#shopTop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+#shopTitle {
+    font-size: 26px;
+    color: rgba(255, 255, 255, .95);
+}
+
+#shopCoins {
+    font-size: 22px;
+    color: rgba(255, 255, 255, .92);
+}
+
+#shopList {
+    display: grid;
+    gap: 10px;
+}
+
+.shopRow {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    align-items: center;
+    gap: 12px;
+
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid var(--bd);
+    background: rgba(255, 255, 255, .03);
+    cursor: pointer;
+    user-select: none;
+}
+
+.shopRow:hover {
+    background: rgba(255, 255, 255, .06);
+}
+
+.shopIcon {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, .10);
+    background-size: cover;
+    background-position: center;
+    image-rendering: pixelated;
+}
+
+.shopMeta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.shopName {
+    font-size: 22px;
+    color: rgba(255, 255, 255, .95);
+}
+
+.shopPrice {
+    font-size: 18px;
+    color: rgba(255, 255, 255, .80);
+}
+
+.shopBuy {
+    font-family: inherit;
+    font-size: 20px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--bd);
+    background: rgba(255, 255, 255, .06);
+    color: rgba(255, 255, 255, .92);
+    cursor: pointer;
+}
+
+.shopBuy:hover {
+    background: rgba(255, 255, 255, .10);
+}
+
+#shopHint {
+    margin-top: 10px;
+    color: rgba(255, 255, 255, .85);
+    font-size: 18px;
+    text-align: center;
+    opacity: .9;
+}

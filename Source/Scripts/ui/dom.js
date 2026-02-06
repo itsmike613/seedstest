@@ -12,5 +12,8 @@ export const root = {
         fps: document.getElementById("fps"),
         pos: document.getElementById("pos"),
         msg: document.getElementById("msg"),
+        shop: document.getElementById("shop"),
+        shopCoins: document.getElementById("shopCoins"),
+        shopList: document.getElementById("shopList"),
     }
 };
