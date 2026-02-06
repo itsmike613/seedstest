@@ -19,15 +19,16 @@
 }
 
 #name {
-    text-align: center;
-    font-size: 40px;
-    color: rgba(255, 255, 255, .92);
-    letter-spacing: 1px;
-    text-shadow: 0 2px 0 rgba(0, 0, 0, .55);
+    display: block;
+    margin: 0 auto;
+    width: min(360px, 70vw);
+    height: auto;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 2px 0 rgba(0, 0, 0, .55));
 }
 
 #stats {
-    margin-top: 8px;
+    margin-top: 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
