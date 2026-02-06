@@ -1,7 +1,6 @@
 // Source/Scripts/core/game.js
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-import { RoomEnvironment } from "https://unpkg.com/three@0.160.0/examples/jsm/environments/RoomEnvironment.js";
 
 import { conf } from "../config/conf.js";
 import { W, H, Y1, INF, YB } from "../config/constants.js";
@@ -43,25 +42,24 @@ export class Game {
 
         this.ren.outputColorSpace = THREE.SRGBColorSpace;
 
-        // Warm, filmic look (pleasant countryside)
+        // Warm, filmic look
         this.ren.toneMapping = THREE.ACESFilmicToneMapping;
         this.ren.toneMappingExposure = 1.12;
 
-        // Shadows: keep soft but not too expensive
+        // Shadows
         this.ren.shadowMap.enabled = true;
         this.ren.shadowMap.type = THREE.PCFSoftShadowMap;
 
         // Scene
         this.scene = new THREE.Scene();
 
-        // Warm fog to match the “happy farm” vibe
+        // Warm fog + clear color
         this.scene.fog = new THREE.Fog(0x77c6ff, 22, 62);
         this.ren.setClearColor(0x77c6ff, 1);
 
         this.cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 200);
 
         // --- lighting ---
-        // Softer warm sun
         this.sun = new THREE.DirectionalLight(0xfff0dd, 1.05);
         this.sun.position.set(10, 18, 8);
         this.sun.castShadow = true;
@@ -75,18 +73,13 @@ export class Game {
         this.sun.shadow.bias = -0.00035;
         this.scene.add(this.sun);
 
-        // Warmer sky light + slightly brighter ground bounce
         this.hemi = new THREE.HemisphereLight(0xdff6ff, 0x4a463d, 0.62);
         this.scene.add(this.hemi);
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.18));
 
-        // --- environment reflections (cheap + effective) ---
-        // This is the big “shader pack” win for shine/reflections without heavy passes.
-        const pmrem = new THREE.PMREMGenerator(this.ren);
-        const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-        this.scene.environment = envTex;
-        pmrem.dispose();
+        // --- environment reflections ---
+        this.scene.environment = this._makeWarmEnvMap();
 
         // --- sky ---
         this.sky = new Sky(this.scene);
@@ -98,7 +91,6 @@ export class Game {
         // --- audio ---
         this.audio = new AudioManager();
 
-        // pickup sound only when pickup succeeds and item is removed
         this.vox.setOnPickup(() => {
             this.audio.playSfx("pickup", {
                 volume: 0.65,
@@ -126,7 +118,6 @@ export class Game {
         this.open = false;
         this.tab = false;
 
-        // mining state
         this.mine = {
             on: false,
             k: "",
@@ -136,7 +127,6 @@ export class Game {
             hitT: 0
         };
 
-        // footsteps state (timed steps)
         this._foot = { t: 0 };
 
         // --- raycast ---
@@ -158,13 +148,53 @@ export class Game {
         this.loop = this.loop.bind(this);
     }
 
+    _makeWarmEnvMap() {
+        const pmrem = new THREE.PMREMGenerator(this.ren);
+        pmrem.compileCubemapShader();
+
+        const envScene = new THREE.Scene();
+
+        envScene.add(new THREE.HemisphereLight(0xfff2dd, 0x5a523f, 1.0));
+
+        const dl = new THREE.DirectionalLight(0xfff0d8, 0.9);
+        dl.position.set(2, 3, 1);
+        envScene.add(dl);
+
+        const boxG = new THREE.BoxGeometry(10, 10, 10);
+        const boxM = new THREE.MeshBasicMaterial({ color: 0x87cfff, side: THREE.BackSide });
+        const box = new THREE.Mesh(boxG, boxM);
+        envScene.add(box);
+
+        const warmCardG = new THREE.PlaneGeometry(6, 6);
+        const warmCardM = new THREE.MeshBasicMaterial({ color: 0xffe2b8, side: THREE.DoubleSide });
+        const warmCard = new THREE.Mesh(warmCardG, warmCardM);
+        warmCard.position.set(0, 1.5, -2.5);
+        envScene.add(warmCard);
+
+        const greenCardM = new THREE.MeshBasicMaterial({ color: 0xbfe7b4, side: THREE.DoubleSide });
+        const greenCard = new THREE.Mesh(warmCardG, greenCardM);
+        greenCard.position.set(-2.8, 0.8, 0.5);
+        greenCard.rotation.y = Math.PI * 0.35;
+        envScene.add(greenCard);
+
+        const sunG = new THREE.SphereGeometry(0.25, 16, 16);
+        const sunM = new THREE.MeshBasicMaterial({ color: 0xfff7e6 });
+        const sun = new THREE.Mesh(sunG, sunM);
+        sun.position.set(1.8, 2.2, 1.2);
+        envScene.add(sun);
+
+        const env = pmrem.fromScene(envScene, 0.04).texture;
+        pmrem.dispose();
+
+        return env;
+    }
+
     seedInitialHotbar() {
         this.bag.hot[0] = { k: "hoe_wood", c: 1 };
         this.bag.hot[1] = { k: "shovel_wood", c: 1 };
         this.bag.hot[2] = { k: "bucket_empty", c: 1 };
         this.bag.hot[3] = { k: "seed_wheat", c: 3 };
         this.bag.hot[4] = { k: "seed_carrot", c: 3 };
-
         this.bag.hot[5] = { k: "seed_blueberry", c: 3 };
         this.bag.hot[6] = { k: "seed_raspberry", c: 3 };
     }
@@ -183,9 +213,7 @@ export class Game {
         return new THREE.Vector3(cx, cy, cz).normalize();
     }
 
-    clampPitch() {
-        this.pl.pit = clamp(this.pl.pit, -1.45, 1.45);
-    }
+    clampPitch() { this.pl.pit = clamp(this.pl.pit, -1.45, 1.45); }
 
     camSync() {
         this.cam.position.copy(this.pl.p);
@@ -312,7 +340,6 @@ export class Game {
             return this.vox.topAt(bx, bz);
         };
 
-        // --- vertical ---
         this.pl.p.y += this.pl.v.y * dt;
 
         const cx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
@@ -627,12 +654,7 @@ export class Game {
 
         this.mine.hitT = Math.max(0, this.mine.hitT - dt);
         if (this.mine.hitT <= 0) {
-            this.audio.playSfx("mine_hit", {
-                volume: 0.42,
-                pitchRandom: 0.08,
-                cooldown: 0,
-                maxVoices: 1
-            });
+            this.audio.playSfx("mine_hit", { volume: 0.42, pitchRandom: 0.08, cooldown: 0, maxVoices: 1 });
             this.mine.hitT = 0.13;
         }
 
@@ -643,7 +665,6 @@ export class Game {
         if (this.mine.t >= this.mine.need) {
             const res = await this.vox.breakBlock(h.x, h.y, h.z);
             if (res) this.audio.playSfx("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
-
             this.mine.t = 0;
             this.mine.hitT = 0;
             this.crack.hide();
