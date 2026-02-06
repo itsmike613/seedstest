@@ -15,6 +15,7 @@ export class VoxRenderer {
         this.mats = new Map();
         this.mesh = new Map();
         this.water = new Set();
+        this._waterMats = new Set();
         this.cropPlanes = new Map();
     }
 
@@ -31,12 +32,69 @@ export class VoxRenderer {
             m = new THREE.MeshStandardMaterial({
                 map: tx,
                 transparent: true,
-                opacity: 0.85,
-                roughness: 0.18,
+                opacity: 0.82,
+                roughness: 0.10,
                 metalness: 0.0,
                 emissive: new THREE.Color(0x112244),
-                emissiveIntensity: 0.15
+                emissiveIntensity: 0.20
             });
+
+            m.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = { value: 0 };
+
+                shader.fragmentShader =
+                    shader.fragmentShader
+                        .replace(
+                            "void main() {",
+                            `
+uniform float uTime;
+
+float hash21(vec2 p){
+  p = fract(p*vec2(123.34, 456.21));
+  p += dot(p, p+45.32);
+  return fract(p.x*p.y);
+}
+
+void main() {
+`
+                        )
+                        // replace the map sample with a distorted UV sample
+                        .replace(
+                            "vec4 sampledDiffuseColor = texture2D( map, vMapUv );",
+                            `
+vec2 uv = vMapUv;
+
+// small, tile-friendly distortion (two layered waves)
+float w1 = sin((uv.y * 12.0) + (uTime * 1.8));
+float w2 = cos((uv.x * 10.0) + (uTime * 1.4));
+uv.x += (w1 * 0.010);
+uv.y += (w2 * 0.008);
+
+// tiny noise shimmer to avoid looking like a sliding texture
+float n = hash21(uv * 16.0 + uTime * 0.15);
+uv += (n - 0.5) * 0.002;
+
+vec4 sampledDiffuseColor = texture2D( map, uv );
+`
+                        )
+                        // add gentle shimmering to the final color
+                        .replace(
+                            "#include <dithering_fragment>",
+                            `
+  // subtle shimmer (very small)
+  float shimmer = 0.04 * sin(uTime * 2.2 + vMapUv.x * 14.0 + vMapUv.y * 10.0);
+  gl_FragColor.rgb += shimmer;
+
+  #include <dithering_fragment>
+`
+                        );
+
+                m.userData.shader = shader;
+            };
+
+            // ensure shader recompiles + gets time updated
+            m.needsUpdate = true;
+            this._waterMats.add(m);
         } else {
             m = new THREE.MeshStandardMaterial({
                 map: tx,
@@ -109,7 +167,6 @@ export class VoxRenderer {
         const g = new THREE.PlaneGeometry(1, 1);
         const center = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
         const off = 0.22;
-
         const planes = [];
         const bases = [];
 
@@ -119,7 +176,11 @@ export class VoxRenderer {
             mesh.rotation.y = rot;
             const nx = Math.sin(rot);
             const nz = Math.cos(rot);
-            mesh.position.set(center.x + nx * off, center.y, center.z + nz * off);
+            mesh.position.set(
+                center.x + nx * off,
+                center.y,
+                center.z + nz * off
+            );
             mesh.scale.set(0.85, 0.95, 0.85);
             mesh.castShadow = true;
             mesh.receiveShadow = false;
@@ -149,8 +210,11 @@ export class VoxRenderer {
 
     visualTick() {
         const t = now();
+        for (const mat of this._waterMats) {
+            const sh = mat.userData.shader;
+            if (sh && sh.uniforms && sh.uniforms.uTime) sh.uniforms.uTime.value = t;
+        }
 
-        // crop sway
         for (const [, d] of this.cropPlanes) {
             const w = 0.06 + 0.015 * Math.sin(t * 0.7 + d.seed);
             const sway = Math.sin(t * (1.4 + 0.25 * Math.sin(d.seed)) + d.seed) * w;
@@ -167,9 +231,8 @@ export class VoxRenderer {
             }
         }
 
-        // water UV flow
-        const flowU = (t * 0.015) % 1;
-        const flowV = (t * 0.010) % 1;
+        const flowU = (t * 0.010) % 1;
+        const flowV = (t * 0.007) % 1;
         for (const k of this.water) {
             const m = this.mesh.get(k);
             if (!m) continue;
