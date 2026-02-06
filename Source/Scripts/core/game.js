@@ -133,6 +133,7 @@ export class Game {
 
         // --- loop timing ---
         this.last = performance.now();
+        this._hydAcc = 0;
         this.loop = this.loop.bind(this);
     }
 
@@ -672,7 +673,12 @@ export class Game {
 
         const suppressStep = await this.mineTick(dt);
 
-        await this.vox.hydrateTick();
+        this._hydAcc += dt;
+        if (this._hydAcc >= 0.25) {
+            this._hydAcc = 0;
+            await this.vox.hydrateTick();
+        }
+
         await this.vox.growTick();
         await this.vox.itemTick(dt, this.pl.p, this.bag);
 
