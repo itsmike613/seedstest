@@ -34,8 +34,8 @@ export function installInput(game) {
                 game._musicStarted = true;
 
                 game.audio.startMusicPlaylist([
-                    "./Source/Assets/Audio/Music/track1.m4a",
-                    "./Source/Assets/Audio/Music/track2.m4a"
+                    "./Source/Assets/Audio/Music/Country Roads.m4a",
+                    "./Source/Assets/Audio/Music/Open Fields.m4a"
                 ]);
             }
             return;
