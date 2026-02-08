@@ -23,7 +23,7 @@ export function installInput(game) {
         game.clampPitch();
     });
 
-    addEventListener("mousedown", async (e) => {
+    addEventListener("mousedown", (e) => {
         if (game.audio) game.audio.unlock();
 
         if (game.open) return;
@@ -42,7 +42,7 @@ export function installInput(game) {
         }
 
         if (e.button === 0) game.mine.on = true;
-        if (e.button === 2) await game.use();
+        if (e.button === 2) game.use();
     });
 
     addEventListener("mouseup", (e) => {
