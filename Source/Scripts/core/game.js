@@ -256,27 +256,37 @@ export class Game {
         const R = 0.25;
         const HEIGHT = 1.62;
         const EPS = 0.001;
+        const STEP = 0.60;
+        const AUTO_JUMP = 1.05;
 
         const solidTop = (bx, bz) => {
             if (bx < 0 || bz < 0 || bx >= W || bz >= H) return -Infinity;
             return this.vox.topAt(bx, bz);
         };
 
-        // --- vertical ---
-        this.pl.p.y += this.pl.v.y * dt;
-        const cx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
-        const cz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
-        const floorTop = solidTop(cx, cz);
-        const feet = this.pl.p.y - HEIGHT;
-        if (feet < floorTop) {
-            this.pl.p.y += (floorTop - feet);
-            this.pl.v.y = 0;
-            this.pl.on = true;
-        } else {
-            this.pl.on = false;
-        }
+        const clampXZ = () => {
+            this.pl.p.x = clamp(this.pl.p.x, R, W - R);
+            this.pl.p.z = clamp(this.pl.p.z, R, H - R);
+        };
 
-        const feetY = this.pl.p.y - HEIGHT;
+        const snapToGround = () => {
+            const cx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
+            const cz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
+            const floorTop = solidTop(cx, cz);
+            const feet = this.pl.p.y - HEIGHT;
+
+            if (feet <= floorTop + EPS) {
+                this.pl.p.y += (floorTop - feet);
+                this.pl.v.y = 0;
+                this.pl.on = true;
+                return floorTop;
+            }
+
+            this.pl.on = false;
+            return floorTop;
+        };
+
+        const feetY = () => this.pl.p.y - HEIGHT;
 
         const resolveX = (x, z) => {
             const minX = clamp(Math.floor(x - R), 0, W - 1);
@@ -284,20 +294,20 @@ export class Game {
             const minZ = clamp(Math.floor(z - R), 0, H - 1);
             const maxZ = clamp(Math.floor(z + R), 0, H - 1);
             let nx = x;
+            const fy = feetY();
 
             for (let bz = minZ; bz <= maxZ; bz++) {
                 for (let bx = minX; bx <= maxX; bx++) {
                     const top = solidTop(bx, bz);
-                    if (top <= feetY + EPS) continue;
+                    if (top <= fy + EPS) continue;
                     const closestX = clamp(nx, bx, bx + 1);
                     const closestZ = clamp(z, bz, bz + 1);
                     const dx = nx - closestX;
                     const dz = z - closestZ;
                     const dd = dx * dx + dz * dz;
-
                     if (dd < R * R - 1e-9) {
-                        if (dx >= 0) nx = (closestX + Math.sqrt(Math.max(0, R * R - dz * dz))) + EPS;
-                        else nx = (closestX - Math.sqrt(Math.max(0, R * R - dz * dz))) - EPS;
+                        const push = Math.sqrt(Math.max(0, R * R - dz * dz));
+                        nx = (dx >= 0) ? (closestX + push + EPS) : (closestX - push - EPS);
                     }
                 }
             }
@@ -310,11 +320,13 @@ export class Game {
             const minZ = clamp(Math.floor(z - R), 0, H - 1);
             const maxZ = clamp(Math.floor(z + R), 0, H - 1);
             let nz = z;
+            const fy = feetY();
 
             for (let bz = minZ; bz <= maxZ; bz++) {
                 for (let bx = minX; bx <= maxX; bx++) {
                     const top = solidTop(bx, bz);
-                    if (top <= feetY + EPS) continue;
+                    if (top <= fy + EPS) continue;
+
                     const closestX = clamp(x, bx, bx + 1);
                     const closestZ = clamp(nz, bz, bz + 1);
                     const dx = x - closestX;
@@ -322,22 +334,61 @@ export class Game {
                     const dd = dx * dx + dz * dz;
 
                     if (dd < R * R - 1e-9) {
-                        if (dz >= 0) nz = (closestZ + Math.sqrt(Math.max(0, R * R - dx * dx))) + EPS;
-                        else nz = (closestZ - Math.sqrt(Math.max(0, R * R - dx * dx))) - EPS;
+                        const push = Math.sqrt(Math.max(0, R * R - dx * dx));
+                        nz = (dz >= 0) ? (closestZ + push + EPS) : (closestZ - push - EPS);
                     }
                 }
             }
             return nz;
         };
 
-        let nx = this.pl.p.x + this.pl.v.x * dt;
-        nx = clamp(nx, R, W - R);
-        nx = resolveX(nx, this.pl.p.z);
-        let nz = this.pl.p.z + this.pl.v.z * dt;
-        nz = clamp(nz, R, H - R);
-        nz = resolveZ(nx, nz);
+        this.pl.p.y += this.pl.v.y * dt;
+        const floorBefore = snapToGround();
+        const startX = this.pl.p.x;
+        const startZ = this.pl.p.z;
+        let wantX = startX + this.pl.v.x * dt;
+        let wantZ = startZ + this.pl.v.z * dt;
+        wantX = clamp(wantX, R, W - R);
+        wantZ = clamp(wantZ, R, H - R);
+        let nx = resolveX(wantX, startZ);
+        let nz = resolveZ(nx, wantZ);
+        const blocked = (Math.abs(nx - wantX) > 1e-6) || (Math.abs(nz - wantZ) > 1e-6);
+
+        if (blocked && this.pl.on) {
+            const saveX = this.pl.p.x;
+            const saveY = this.pl.p.y;
+            const saveZ = this.pl.p.z;
+            this.pl.p.y = saveY + STEP;
+            let sx = resolveX(wantX, startZ);
+            let sz = resolveZ(sx, wantZ);
+            this.pl.p.x = sx;
+            this.pl.p.z = sz;
+            clampXZ();
+            const floorAfter = snapToGround();
+            const rise = floorAfter - floorBefore;
+
+            if (rise <= STEP + EPS) {
+                nx = this.pl.p.x;
+                nz = this.pl.p.z;
+            } else {
+                this.pl.p.x = saveX;
+                this.pl.p.y = saveY;
+                this.pl.p.z = saveZ;
+
+                if (rise <= AUTO_JUMP + EPS) {
+                    this.pl.v.y = conf.jump;
+                    this.pl.on = false;
+                }
+
+                nx = resolveX(wantX, startZ);
+                nz = resolveZ(nx, wantZ);
+            }
+        }
+
         this.pl.p.x = nx;
         this.pl.p.z = nz;
+        clampXZ();
+        snapToGround();
     }
 
     async hit() {
