@@ -4,9 +4,7 @@ export const K = Object.create(null);
 
 export function installInput(game) {
     game._musicStarted = false;
-
     addEventListener("resize", () => game.onResize());
-
     document.addEventListener("pointerlockchange", () => {
         game.lock = (document.pointerLockElement === game.root.el.c);
     });
@@ -17,7 +15,6 @@ export function installInput(game) {
             game.root.el.carry.style.top = e.clientY + "px";
         }
         if (!game.lock || game.open) return;
-
         game.pl.yaw -= e.movementX * game.conf.sens;
         game.pl.pit -= e.movementY * game.conf.sens;
         game.clampPitch();
@@ -25,14 +22,11 @@ export function installInput(game) {
 
     addEventListener("mousedown", async (e) => {
         if (game.audio) game.audio.unlock();
-
         if (game.open) return;
         if (!game.lock) {
             game.root.el.c.requestPointerLock();
-
             if (game.audio && !game._musicStarted) {
                 game._musicStarted = true;
-
                 game.audio.startMusicPlaylist([
                     "./Source/Assets/Audio/Music/Country Roads.m4a",
                     "./Source/Assets/Audio/Music/Open Fields.m4a"
@@ -57,10 +51,8 @@ export function installInput(game) {
 
     addEventListener("keydown", (e) => {
         if (game.audio) game.audio.unlock();
-
         game.prevent(e);
         K[e.code] = true;
-
         if (e.code === "KeyE" && !e.repeat) {
             game.setOpen(!game.open);
             game.mine.on = false;

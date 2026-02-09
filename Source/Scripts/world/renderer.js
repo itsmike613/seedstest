@@ -69,7 +69,6 @@ export class VoxRenderer {
         const m = await this.mat(b.img, id);
         const mesh = new THREE.Mesh(this.g, m);
         mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
-
         mesh.castShadow = (id !== "water");
         mesh.receiveShadow = true;
 
@@ -109,7 +108,6 @@ export class VoxRenderer {
         const g = new THREE.PlaneGeometry(1, 1);
         const center = new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
         const off = 0.22;
-
         const planes = [];
         const bases = [];
 

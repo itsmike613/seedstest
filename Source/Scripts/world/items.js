@@ -19,7 +19,6 @@ export class ItemSystem {
     spawn(k, p, c) {
         const it = items[k];
         if (!it) return;
-
         for (const d of this.items) {
             if (d.k === k && it.stack > 1 && d2(d.p, p) < 0.5 * 0.5) {
                 d.c = Math.min(it.stack, d.c + c);
@@ -38,7 +37,6 @@ export class ItemSystem {
 
     async ensureMesh(d) {
         if (d.m) return;
-
         const it = items[d.k];
         const tx = await this.t.get(it.img);
 
@@ -51,14 +49,10 @@ export class ItemSystem {
             });
 
             const mesh = new THREE.Mesh(this._cubeGeo, mat);
-
-            // Minecraft-ish dropped block size
             const s = 0.33;
             mesh.scale.set(s, s, s);
-
             mesh.castShadow = true;
             mesh.receiveShadow = false;
-
             mesh.position.copy(d.p);
             this.s.add(mesh);
             d.m = mesh;

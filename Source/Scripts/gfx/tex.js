@@ -35,7 +35,6 @@ export class Tex {
         t.magFilter = THREE.NearestFilter;
         t.minFilter = THREE.NearestFilter;
         t.generateMipmaps = false;
-
         this.m.set(url, t);
         return t;
     }

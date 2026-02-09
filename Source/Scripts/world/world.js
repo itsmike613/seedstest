@@ -1,7 +1,6 @@
 // Source/Scripts/world/world.js
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-
 import { conf } from "../config/conf.js";
 import { W, H, Y0, Y1, INF, YB } from "../config/constants.js";
 import { blocks } from "../data/blocks.js";
@@ -9,7 +8,6 @@ import { crops } from "../data/crops.js";
 import { items } from "../data/items.js";
 import { now, rnd } from "../util/math.js";
 import { key, parse } from "../util/gridKey.js";
-
 import { VoxRenderer } from "./renderer.js";
 import { ItemSystem } from "./items.js";
 import { ParticleSystem } from "./particles.js";
@@ -18,22 +16,15 @@ export class Vox {
     constructor(scene, tex) {
         this.scene = scene;
         this.tex = tex;
-
-        this.map = new Map();    // key(x,y,z) => id
-        this.tilled = new Map(); // key(x,Y1,z) => {wet, ts}
-        this.crop = new Map();   // key(x,Y1,z) => {type, st, ts}
-
+        this.map = new Map();
+        this.tilled = new Map();
+        this.crop = new Map();
         this.bush = new Map();
-
         this.renderer = new VoxRenderer(scene, tex);
-
-        // pickup callback is set later by Game via setOnPickup()
         this._onPickup = null;
-
         this.items = new ItemSystem(scene, tex, (x, z) => this.topAt(x, z), () => {
             if (this._onPickup) this._onPickup();
         });
-
         this.parts = new ParticleSystem(scene);
     }
 
@@ -42,7 +33,6 @@ export class Vox {
     }
 
     get mesh() { return this.renderer.mesh; }
-
     inPad(x, z) { return x >= 0 && z >= 0 && x < W && z < H; }
     get(x, y, z) { return this.map.get(key(x, y, z)); }
 
@@ -58,10 +48,8 @@ export class Vox {
         const k = key(x, y, z);
         const prev = this.map.get(k);
         if (prev === id) return;
-
         if (!id) this.map.delete(k);
         else this.map.set(k, id);
-
         await this.renderer.setBlockMesh(x, y, z, id, prev);
     }
 
@@ -92,9 +80,7 @@ export class Vox {
         const id = this.get(x, Y1, z);
         if (id !== "grass" && id !== "dirt") return false;
         if (!this.nearWater(x, z)) return false;
-
         if (this.bush.has(key(x, YB, z))) return false;
-
         await this.set(x, Y1, z, "tilled_dry");
         this.tilled.set(key(x, Y1, z), { wet: false, ts: now() });
         return true;
@@ -103,12 +89,9 @@ export class Vox {
     async plant(x, z, type) {
         const id = this.get(x, Y1, z);
         if (id !== "tilled_dry" && id !== "tilled_wet") return false;
-
         const k = key(x, Y1, z);
         if (this.crop.has(k)) return false;
-
         if (this.bush.has(key(x, YB, z))) return false;
-
         this.crop.set(k, { type, st: 0, ts: now() });
         await this.renderer.setCropPlanes(x, Y1, z, type, 0);
         return true;
@@ -129,7 +112,6 @@ export class Vox {
     }
 
     bushAt(x, y, z) {
-        // bushes always live at YB; allow callers to pass any y
         return this.bush.get(key(x, YB, z)) || null;
     }
 
@@ -137,23 +119,18 @@ export class Vox {
         const k = key(x, YB, z);
         const b = this.bush.get(k);
         if (!b) return;
-
         const def = crops[b.type];
         const id = full ? def.bush.full : def.bush.empty;
-
         b.full = full;
         b.ts = now();
-
         await this.set(x, YB, z, id);
     }
 
     async convertCropToBush(x, z, type) {
         const def = crops[type];
         if (!def || !def.bush) return;
-
         this.crop.delete(key(x, Y1, z));
         this.renderer.removeCropPlanes(x, Y1, z);
-
         await this.set(x, YB, z, def.bush.empty);
         this.bush.set(key(x, YB, z), { type, full: false, ts: now() });
     }
@@ -162,13 +139,10 @@ export class Vox {
         const b = this.bush.get(key(x, YB, z));
         if (!b) return { ok: false, why: "not_bush" };
         if (!b.full) return { ok: false, why: "not_ready" };
-
         const def = crops[b.type];
         const drop = def.bush.berry;
-
         this.items.spawn(drop.item, new THREE.Vector3(x + 0.5, YB + 0.25, z + 0.5), rnd(drop.min, drop.max));
         this.parts.burst(x, YB, z);
-
         await this.setBushVisual(x, z, false);
         return { ok: true, why: "harvested" };
     }
@@ -177,9 +151,7 @@ export class Vox {
         const k = key(x, YB, z);
         const b = this.bush.get(k);
         if (!b) return false;
-
         const def = crops[b.type];
-
         this.items.spawn(def.seed, new THREE.Vector3(x + 0.5, YB + 0.25, z + 0.5), 1);
 
         if (b.full) {
@@ -261,7 +233,6 @@ export class Vox {
         for (const [k, b] of this.bush) {
             if (b.full) continue;
             if ((t - b.ts) < conf.berry) continue;
-
             const p = parse(k);
             const cur = this.get(p.x, p.y, p.z);
             if (!cur || !this.isBushId(cur)) {
@@ -275,12 +246,10 @@ export class Vox {
         for (const [k, c] of this.crop) {
             if ((t - c.ts) < conf.grow) continue;
             c.ts = t;
-
             const p = parse(k);
             const soil = this.get(p.x, p.y, p.z);
             const wet = (soil === "tilled_wet");
             if (!wet && Math.random() < 0.6) continue;
-
             const max = crops[c.type].stages.length - 1;
             if (c.st < max) {
                 c.st++;
@@ -301,11 +270,9 @@ export class Vox {
 
     async breakBlock(x, y, z) {
         if (x === INF.x && y === INF.y && z === INF.z) return null;
-
         const id = this.get(x, y, z);
         if (!id) return null;
         if (!blocks[id].breakable) return null;
-
         if (y === YB) {
             const ok = await this.breakBush(x, z);
             return ok ? "bush" : null;
@@ -313,7 +280,6 @@ export class Vox {
 
         if (y === Y1) {
             if (this.bush.has(key(x, YB, z))) await this.breakBush(x, z);
-
             await this.breakCrop(x, z);
             const ck = key(x, y, z);
             if (id === "tilled_dry" || id === "tilled_wet") this.tilled.delete(ck);
@@ -335,11 +301,9 @@ export class Vox {
         if (!this.inPad(x, z)) return false;
         if (y !== Y1) return false;
         if (x === INF.x && y === INF.y && z === INF.z) return false;
-
         const k = key(x, y, z);
         if (this.crop.has(k)) return false;
         if (this.bush.has(key(x, YB, z))) return false;
-
         await this.set(x, y, z, id);
         if (id === "dirt") this.regrowLater(x, y, z);
         return true;

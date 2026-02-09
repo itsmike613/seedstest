@@ -24,25 +24,21 @@ export class Hologram {
         const c = document.createElement("canvas");
         c.width = 256; c.height = 64;
         const g = c.getContext("2d");
-
         g.clearRect(0, 0, c.width, c.height);
         g.fillStyle = "rgba(0,0,0,0.55)";
         this.round(g, 8, 8, 240, 48, 10); g.fill();
         g.strokeStyle = "rgba(255,255,255,0.18)";
         g.lineWidth = 2; this.round(g, 8, 8, 240, 48, 10); g.stroke();
-
         g.fillStyle = "rgba(255,255,255,0.95)";
         g.font = "32px 'Jersey 10'";
         g.textAlign = "center";
         g.textBaseline = "middle";
         g.fillText("Infinite Water", 128, 32);
-
         const tx = new THREE.CanvasTexture(c);
         tx.colorSpace = THREE.SRGBColorSpace;
         tx.magFilter = THREE.NearestFilter;
         tx.minFilter = THREE.NearestFilter;
         tx.generateMipmaps = false;
-
         const mat = new THREE.SpriteMaterial({ map: tx, transparent: true, depthWrite: false });
         const spr = new THREE.Sprite(mat);
         spr.position.set(INF.x + 0.5, Y1 + 2.2, INF.z + 0.5);

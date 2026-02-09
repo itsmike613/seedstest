@@ -45,12 +45,10 @@ export class UI {
     paintSlot(el, st) {
         el.innerHTML = "";
         if (!st) return;
-
         const a = document.createElement("div");
         a.className = "icon";
         a.style.backgroundImage = `url("${items[st.k].img}")`;
         el.appendChild(a);
-
         const it = items[st.k];
         if (it.stack > 1 && st.c > 1) {
             const n = document.createElement("div");
@@ -79,7 +77,6 @@ export class UI {
                 b.className = "icon";
                 b.style.backgroundImage = `url("${items[this.bag.carry.k].img}")`;
                 a.appendChild(b);
-
                 if (items[this.bag.carry.k].stack > 1 && this.bag.carry.c > 1) {
                     const n = document.createElement("div");
                     n.className = "num";
