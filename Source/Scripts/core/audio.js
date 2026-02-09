@@ -24,10 +24,10 @@ export class AudioManager {
         };
 
         this._footDuck = 1.0;
-
         this.SFX_DIR = "./Source/Assets/Audio/SFX/";
         this.MUSIC_DIR = "./Source/Assets/Audio/Music/";
 
+        // --- raw asset map (internal) ---
         this.sfx = {
             footstep_grass: this.SFX_DIR + "footstep_grass.mp3",
             footstep_path: this.SFX_DIR + "footstep_path.mp3",
@@ -64,6 +64,128 @@ export class AudioManager {
             footstep_dirt: 1
         };
     }
+
+    // -----------------------------
+    // Public "game semantic" API
+    // -----------------------------
+
+    preloadGameSfx() {
+        return this.preloadSfx([
+            "footstep_grass", "footstep_path", "footstep_dirt",
+            "hoe", "shovel", "mine_hit", "mine_break",
+            "pickup", "harvest", "plant", "place_dirt",
+            "bucket_fill", "bucket_pour"
+        ]);
+    }
+
+    footstep(surface) {
+        const name =
+            (surface === "path") ? "footstep_path" :
+                (surface === "dirt") ? "footstep_dirt" :
+                    "footstep_grass";
+
+        return this.playSfx(name, {
+            bus: "foot",
+            volume: 0.16,
+            pitchRandom: 0.08,
+            cooldown: 0.0,
+            maxVoices: 1
+        });
+    }
+
+    pickup() {
+        return this.playSfx("pickup", {
+            volume: 0.65,
+            pitchRandom: 0.06,
+            cooldown: 0.04,
+            maxVoices: 2
+        });
+    }
+
+    harvest() {
+        return this.playSfx("harvest", {
+            volume: 0.85,
+            pitchRandom: 0.06,
+            cooldown: 0.03
+        });
+    }
+
+    plant() {
+        return this.playSfx("plant", {
+            volume: 0.78,
+            pitchRandom: 0.08,
+            cooldown: 0.03
+        });
+    }
+
+    hoe() {
+        return this.playSfx("hoe", {
+            volume: 0.8,
+            pitchRandom: 0.06,
+            cooldown: 0.03
+        });
+    }
+
+    shovel() {
+        return this.playSfx("shovel", {
+            volume: 0.75,
+            pitchRandom: 0.06,
+            cooldown: 0.03
+        });
+    }
+
+    placeDirt() {
+        return this.playSfx("place_dirt", {
+            volume: 0.72,
+            pitchRandom: 0.06,
+            cooldown: 0.03
+        });
+    }
+
+    bucketFill() {
+        return this.playSfx("bucket_fill", {
+            volume: 0.9,
+            pitchRandom: 0.04,
+            cooldown: 0.06,
+            maxVoices: 1
+        });
+    }
+
+    bucketPour() {
+        return this.playSfx("bucket_pour", {
+            volume: 0.9,
+            pitchRandom: 0.04,
+            cooldown: 0.06,
+            maxVoices: 1
+        });
+    }
+
+    mineHit() {
+        return this.playSfx("mine_hit", {
+            volume: 0.42,
+            pitchRandom: 0.08,
+            cooldown: 0,
+            maxVoices: 1
+        });
+    }
+
+    mineBreak() {
+        return this.playSfx("mine_break", {
+            volume: 0.82,
+            pitchRandom: 0.06,
+            cooldown: 0.02,
+            maxVoices: 2
+        });
+    }
+
+    setMiningActive(active) {
+        if (active) this.setFootDuck(0.55, 0.03, 0.12);
+        else this.setFootDuck(1.0, 0.03, 0.12);
+    }
+
+    // -----------------------------
+    // Core audio engine
+    // -----------------------------
 
     async unlock() {
         this._ensureCtx();
@@ -226,8 +348,8 @@ export class AudioManager {
         if (!this._cooldownOk(key, opts.cooldown || 0)) return null;
         const maxVoices = (opts.maxVoices != null) ? opts.maxVoices : (this._defaultMaxVoices[nameOrUrl] ?? 0);
         if (!this._canPlayVoice(nameOrUrl, maxVoices)) return null;
-
         let buf;
+
         try {
             buf = await this._loadBuffer(url);
         } catch {
@@ -313,6 +435,7 @@ export class AudioManager {
         this._music.i++;
         this._music.nowPlaying = this._trackDisplayName(url);
         let buf;
+
         try {
             buf = await this._loadBuffer(url);
         } catch {

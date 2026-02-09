@@ -59,16 +59,9 @@ export class Game {
         this.tex = new Tex();
         this.vox = new Vox(this.scene, this.tex);
 
-        // --- audio ---
+        // --- audio (connection point only) ---
         this.audio = new AudioManager();
-        this.vox.setOnPickup(() => {
-            this.audio.playSfx("pickup", {
-                volume: 0.65,
-                pitchRandom: 0.06,
-                cooldown: 0.04,
-                maxVoices: 2
-            });
-        });
+        this.vox.setOnPickup(() => this.audio.pickup());
 
         // --- player ---
         this.pl = {
@@ -245,10 +238,12 @@ export class Game {
         const fr = this.pl.on ? conf.fr : conf.air;
         this.pl.v.x = this.damp(this.pl.v.x, ax * sp, fr, dt);
         this.pl.v.z = this.damp(this.pl.v.z, az * sp, fr, dt);
+        
         if (this.pl.on && K["Space"]) {
             this.pl.v.y = conf.jump;
             this.pl.on = false;
         }
+
         this.pl.v.y -= conf.grav * dt;
     }
 
@@ -271,19 +266,16 @@ export class Game {
             const x1 = Math.floor(px + R);
             const z0 = Math.floor(pz - R);
             const z1 = Math.floor(pz + R);
-
             let t = topAt(x0, z0);
             let v = topAt(x1, z0); if (v > t) t = v;
             v = topAt(x0, z1); if (v > t) t = v;
             v = topAt(x1, z1); if (v > t) t = v;
-
             return t;
         };
 
         this.pl.p.y += this.pl.v.y * dt;
         const oldX = this.pl.p.x;
         const oldZ = this.pl.p.z;
-        const oldFeet = this.pl.p.y - HEIGHT;
         let nx = oldX + this.pl.v.x * dt;
         let nz = oldZ + this.pl.v.z * dt;
         nx = clamp(nx, R, W - R);
@@ -292,6 +284,7 @@ export class Game {
         const newTop = groundTopAt(nx, nz);
         const rise = newTop - oldTop;
         const feet = this.pl.p.y - HEIGHT;
+
         if (rise > EPS && this.pl.on) {
             if (rise <= STEP + EPS) {
                 this.pl.p.x = nx;
@@ -327,7 +320,7 @@ export class Game {
             return;
         }
 
-        if (this.pl.on && (top - f) > -DROP_STICK) {
+        if (this.pl.on && (top - f) > -0.25) {
             this.pl.p.y += (top - f);
             this.pl.v.y = 0;
             this.pl.on = true;
@@ -348,13 +341,16 @@ export class Game {
         });
     }
 
-    _footNameUnderPlayer() {
+    // -----------------------------
+    // Footsteps
+    // -----------------------------
+    _footSurfaceUnderPlayer() {
         const bx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
         const bz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
         const id = this.vox.get(bx, Y1, bz);
-        if (id === "path") return "footstep_path";
-        if (id === "dirt" || id === "tilled_dry" || id === "tilled_wet") return "footstep_dirt";
-        return "footstep_grass";
+        if (id === "path") return "path";
+        if (id === "dirt" || id === "tilled_dry" || id === "tilled_wet") return "dirt";
+        return "grass";
     }
 
     _footInterval() {
@@ -374,19 +370,14 @@ export class Game {
         }
 
         if (this._foot.t > 0) return;
-        const name = this._footNameUnderPlayer();
-
-        this.audio.playSfx(name, {
-            bus: "foot",
-            volume: 0.16,
-            pitchRandom: 0.08,
-            cooldown: 0.0,
-            maxVoices: 1
-        });
-
+        const surface = this._footSurfaceUnderPlayer();
+        this.audio.footstep(surface);
         this._foot.t = this._footInterval();
     }
 
+    // -----------------------------
+    // Actions / Interactions
+    // -----------------------------
     async use() {
         const h = await this.hit();
         if (!h) return;
@@ -395,7 +386,7 @@ export class Game {
             const b = this.vox.bushAt(h.x, h.y, h.z);
             if (b) {
                 const r = await this.vox.useBush(h.x, h.z);
-                if (r.ok) this.audio.playSfx("harvest", { volume: 0.85, pitchRandom: 0.06, cooldown: 0.03 });
+                if (r.ok) this.audio.harvest();
                 if (!r.ok && r.why === "not_ready") this.msg("Not ready");
                 return;
             }
@@ -409,11 +400,8 @@ export class Game {
         if (s.k === "hoe_wood") {
             if (h.y === Y1) {
                 const ok = await this.vox.till(h.x, h.z);
-                if (ok) {
-                    this.audio.playSfx("hoe", { volume: 0.8, pitchRandom: 0.06, cooldown: 0.03 });
-                } else {
-                    this.msg("Needs water within 5");
-                }
+                if (ok) this.audio.hoe();
+                else this.msg("Needs water within 5");
             }
             return;
         }
@@ -423,7 +411,7 @@ export class Game {
                 const id = this.vox.get(h.x, h.y, h.z);
                 if (id === "grass") {
                     await this.vox.set(h.x, h.y, h.z, "path");
-                    this.audio.playSfx("shovel", { volume: 0.75, pitchRandom: 0.06, cooldown: 0.03 });
+                    this.audio.shovel();
                 }
             }
             return;
@@ -441,7 +429,7 @@ export class Game {
                 if (!type) return;
                 const ok = await this.vox.plant(h.x, h.z, type);
                 if (ok) {
-                    this.audio.playSfx("plant", { volume: 0.78, pitchRandom: 0.08, cooldown: 0.03 });
+                    this.audio.plant();
                     s.c -= 1;
                     if (s.c <= 0) this.bag.hot[this.bag.sel] = null;
                 }
@@ -452,14 +440,14 @@ export class Game {
         if (s.k === "bucket_empty") {
             if (h.x === INF.x && h.y === INF.y && h.z === INF.z) {
                 this.bag.hot[this.bag.sel] = { k: "bucket_full", c: 1 };
-                this.audio.playSfx("bucket_fill", { volume: 0.9, pitchRandom: 0.04, cooldown: 0.06, maxVoices: 1 });
+                this.audio.bucketFill();
                 this.msg("Filled");
                 return;
             }
             if (this.vox.get(h.x, h.y, h.z) === "water" && h.y === Y1) {
                 await this.vox.set(h.x, h.y, h.z, null);
                 this.bag.hot[this.bag.sel] = { k: "bucket_full", c: 1 };
-                this.audio.playSfx("bucket_fill", { volume: 0.9, pitchRandom: 0.04, cooldown: 0.06, maxVoices: 1 });
+                this.audio.bucketFill();
                 this.msg("Filled");
                 return;
             }
@@ -474,7 +462,7 @@ export class Game {
             if (Math.hypot(dx, dz) < 0.6) return;
             await this.vox.place(h.px, h.py, h.pz, "water");
             this.bag.hot[this.bag.sel] = { k: "bucket_empty", c: 1 };
-            this.audio.playSfx("bucket_pour", { volume: 0.9, pitchRandom: 0.04, cooldown: 0.06, maxVoices: 1 });
+            this.audio.bucketPour();
             this.msg("Poured");
             return;
         }
@@ -487,7 +475,7 @@ export class Game {
             if (Math.hypot(dx, dz) < 0.6) return;
             const ok = await this.vox.place(h.px, h.py, h.pz, "dirt");
             if (ok) {
-                this.audio.playSfx("place_dirt", { volume: 0.72, pitchRandom: 0.06, cooldown: 0.03 });
+                this.audio.placeDirt();
                 s.c -= 1;
                 if (s.c <= 0) this.bag.hot[this.bag.sel] = null;
             }
@@ -512,14 +500,14 @@ export class Game {
 
     async mineTick(dt) {
         if (!this.mine.on || this.open || !this.lock) {
-            this.audio.setFootDuck(1.0, 0.03, 0.12);
+            this.audio.setMiningActive(false);
             this.mine.hitT = 0;
             return false;
         }
 
         const h = await this.hit();
         if (!h) {
-            this.audio.setFootDuck(1.0, 0.03, 0.12);
+            this.audio.setMiningActive(false);
             this.mine.t = 0;
             this.mine.hitT = 0;
             this.crack.hide();
@@ -530,8 +518,8 @@ export class Game {
             const ck = key(h.x, Y1, h.z);
             if (this.vox.crop.has(ck)) {
                 const ok = await this.vox.breakCrop(h.x, h.z);
-                if (ok) this.audio.playSfx("harvest", { volume: 0.85, pitchRandom: 0.06, cooldown: 0.03 });
-                this.audio.setFootDuck(1.0, 0.03, 0.12);
+                if (ok) this.audio.harvest();
+                this.audio.setMiningActive(false);
                 this.mine.t = 0;
                 this.mine.hitT = 0;
                 this.crack.hide();
@@ -540,13 +528,12 @@ export class Game {
         }
 
         const id = this.vox.get(h.x, h.y, h.z);
-        if (!id) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
-        if (!blocks[id].breakable) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
-        if (h.x === INF.x && h.y === INF.y && h.z === INF.z) { this.audio.setFootDuck(1.0, 0.03, 0.12); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
-
-        this.audio.setFootDuck(0.55, 0.03, 0.12);
-
+        if (!id) { this.audio.setMiningActive(false); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
+        if (!blocks[id].breakable) { this.audio.setMiningActive(false); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
+        if (h.x === INF.x && h.y === INF.y && h.z === INF.z) { this.audio.setMiningActive(false); this.mine.t = 0; this.mine.hitT = 0; this.crack.hide(); return false; }
+        this.audio.setMiningActive(true);
         const same = (this.mine.k === id && this.mine.p.x === h.x && this.mine.p.y === h.y && this.mine.p.z === h.z);
+
         if (!same) {
             this.mine.k = id;
             this.mine.p = { x: h.x, y: h.y, z: h.z };
@@ -557,15 +544,10 @@ export class Game {
 
         this.mine.need = this.speedFor(id);
         this.mine.t += dt;
-
         this.mine.hitT = Math.max(0, this.mine.hitT - dt);
+
         if (this.mine.hitT <= 0) {
-            this.audio.playSfx("mine_hit", {
-                volume: 0.42,
-                pitchRandom: 0.08,
-                cooldown: 0,
-                maxVoices: 1
-            });
+            this.audio.mineHit();
             this.mine.hitT = 0.13;
         }
 
@@ -575,10 +557,7 @@ export class Game {
 
         if (this.mine.t >= this.mine.need) {
             const res = await this.vox.breakBlock(h.x, h.y, h.z);
-            if (res) {
-                this.audio.playSfx("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
-            }
-
+            if (res) this.audio.mineBreak();
             this.mine.t = 0;
             this.mine.hitT = 0;
             this.crack.hide();
@@ -636,14 +615,7 @@ export class Game {
         await this.vox.init();
         await this.holo.init();
         this.pl.p.set(1.35, 2.65, 1.35);
-
-        this.audio.preloadSfx([
-            "footstep_grass", "footstep_path", "footstep_dirt",
-            "hoe", "shovel", "mine_hit", "mine_break",
-            "pickup", "harvest", "plant", "place_dirt",
-            "bucket_fill", "bucket_pour"
-        ]);
-
+        this.audio.preloadGameSfx();
         this.msg("Click to play");
         requestAnimationFrame(this.loop);
     }
