@@ -257,138 +257,84 @@ export class Game {
         const HEIGHT = 1.62;
         const EPS = 0.001;
         const STEP = 0.60;
-        const AUTO_JUMP = 1.05;
+        const AUTO_HOP = 1.05;
+        const DROP_STICK = 0.25;
 
-        const solidTop = (bx, bz) => {
-            if (bx < 0 || bz < 0 || bx >= W || bz >= H) return -Infinity;
+        const topAt = (x, z) => {
+            const bx = clamp(x, 0, W - 1);
+            const bz = clamp(z, 0, H - 1);
             return this.vox.topAt(bx, bz);
         };
 
-        const clampXZ = () => {
-            this.pl.p.x = clamp(this.pl.p.x, R, W - R);
-            this.pl.p.z = clamp(this.pl.p.z, R, H - R);
-        };
+        const groundTopAt = (px, pz) => {
+            const x0 = Math.floor(px - R);
+            const x1 = Math.floor(px + R);
+            const z0 = Math.floor(pz - R);
+            const z1 = Math.floor(pz + R);
 
-        const snapToGround = () => {
-            const cx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
-            const cz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
-            const floorTop = solidTop(cx, cz);
-            const feet = this.pl.p.y - HEIGHT;
+            let t = topAt(x0, z0);
+            let v = topAt(x1, z0); if (v > t) t = v;
+            v = topAt(x0, z1); if (v > t) t = v;
+            v = topAt(x1, z1); if (v > t) t = v;
 
-            if (feet <= floorTop + EPS) {
-                this.pl.p.y += (floorTop - feet);
-                this.pl.v.y = 0;
-                this.pl.on = true;
-                return floorTop;
-            }
-
-            this.pl.on = false;
-            return floorTop;
-        };
-
-        const feetY = () => this.pl.p.y - HEIGHT;
-
-        const resolveX = (x, z) => {
-            const minX = clamp(Math.floor(x - R), 0, W - 1);
-            const maxX = clamp(Math.floor(x + R), 0, W - 1);
-            const minZ = clamp(Math.floor(z - R), 0, H - 1);
-            const maxZ = clamp(Math.floor(z + R), 0, H - 1);
-            let nx = x;
-            const fy = feetY();
-
-            for (let bz = minZ; bz <= maxZ; bz++) {
-                for (let bx = minX; bx <= maxX; bx++) {
-                    const top = solidTop(bx, bz);
-                    if (top <= fy + EPS) continue;
-                    const closestX = clamp(nx, bx, bx + 1);
-                    const closestZ = clamp(z, bz, bz + 1);
-                    const dx = nx - closestX;
-                    const dz = z - closestZ;
-                    const dd = dx * dx + dz * dz;
-                    if (dd < R * R - 1e-9) {
-                        const push = Math.sqrt(Math.max(0, R * R - dz * dz));
-                        nx = (dx >= 0) ? (closestX + push + EPS) : (closestX - push - EPS);
-                    }
-                }
-            }
-            return nx;
-        };
-
-        const resolveZ = (x, z) => {
-            const minX = clamp(Math.floor(x - R), 0, W - 1);
-            const maxX = clamp(Math.floor(x + R), 0, W - 1);
-            const minZ = clamp(Math.floor(z - R), 0, H - 1);
-            const maxZ = clamp(Math.floor(z + R), 0, H - 1);
-            let nz = z;
-            const fy = feetY();
-
-            for (let bz = minZ; bz <= maxZ; bz++) {
-                for (let bx = minX; bx <= maxX; bx++) {
-                    const top = solidTop(bx, bz);
-                    if (top <= fy + EPS) continue;
-
-                    const closestX = clamp(x, bx, bx + 1);
-                    const closestZ = clamp(nz, bz, bz + 1);
-                    const dx = x - closestX;
-                    const dz = nz - closestZ;
-                    const dd = dx * dx + dz * dz;
-
-                    if (dd < R * R - 1e-9) {
-                        const push = Math.sqrt(Math.max(0, R * R - dx * dx));
-                        nz = (dz >= 0) ? (closestZ + push + EPS) : (closestZ - push - EPS);
-                    }
-                }
-            }
-            return nz;
+            return t;
         };
 
         this.pl.p.y += this.pl.v.y * dt;
-        const floorBefore = snapToGround();
-        const startX = this.pl.p.x;
-        const startZ = this.pl.p.z;
-        let wantX = startX + this.pl.v.x * dt;
-        let wantZ = startZ + this.pl.v.z * dt;
-        wantX = clamp(wantX, R, W - R);
-        wantZ = clamp(wantZ, R, H - R);
-        let nx = resolveX(wantX, startZ);
-        let nz = resolveZ(nx, wantZ);
-        const blocked = (Math.abs(nx - wantX) > 1e-6) || (Math.abs(nz - wantZ) > 1e-6);
-
-        if (blocked && this.pl.on) {
-            const saveX = this.pl.p.x;
-            const saveY = this.pl.p.y;
-            const saveZ = this.pl.p.z;
-            this.pl.p.y = saveY + STEP;
-            let sx = resolveX(wantX, startZ);
-            let sz = resolveZ(sx, wantZ);
-            this.pl.p.x = sx;
-            this.pl.p.z = sz;
-            clampXZ();
-            const floorAfter = snapToGround();
-            const rise = floorAfter - floorBefore;
-
+        const oldX = this.pl.p.x;
+        const oldZ = this.pl.p.z;
+        const oldFeet = this.pl.p.y - HEIGHT;
+        let nx = oldX + this.pl.v.x * dt;
+        let nz = oldZ + this.pl.v.z * dt;
+        nx = clamp(nx, R, W - R);
+        nz = clamp(nz, R, H - R);
+        const oldTop = groundTopAt(oldX, oldZ);
+        const newTop = groundTopAt(nx, nz);
+        const rise = newTop - oldTop;
+        const feet = this.pl.p.y - HEIGHT;
+        if (rise > EPS && this.pl.on) {
             if (rise <= STEP + EPS) {
-                nx = this.pl.p.x;
-                nz = this.pl.p.z;
-            } else {
-                this.pl.p.x = saveX;
-                this.pl.p.y = saveY;
-                this.pl.p.z = saveZ;
-
-                if (rise <= AUTO_JUMP + EPS) {
-                    this.pl.v.y = conf.jump;
-                    this.pl.on = false;
-                }
-
-                nx = resolveX(wantX, startZ);
-                nz = resolveZ(nx, wantZ);
+                this.pl.p.x = nx;
+                this.pl.p.z = nz;
+                const snap = newTop - feet;
+                if (snap > 0) this.pl.p.y += snap;
+                this.pl.v.y = 0;
+                this.pl.on = true;
+                return;
             }
+
+            if (rise <= AUTO_HOP + EPS) {
+                this.pl.p.x = nx;
+                this.pl.p.z = nz;
+                this.pl.v.y = conf.jump;
+                this.pl.on = false;
+            } else {
+                this.pl.p.x = oldX;
+                this.pl.p.z = oldZ;
+            }
+        } else {
+            this.pl.p.x = nx;
+            this.pl.p.z = nz;
         }
 
-        this.pl.p.x = nx;
-        this.pl.p.z = nz;
-        clampXZ();
-        snapToGround();
+        const top = groundTopAt(this.pl.p.x, this.pl.p.z);
+        const f = this.pl.p.y - HEIGHT;
+
+        if (f <= top + EPS) {
+            this.pl.p.y += (top - f);
+            this.pl.v.y = 0;
+            this.pl.on = true;
+            return;
+        }
+
+        if (this.pl.on && (top - f) > -DROP_STICK) {
+            this.pl.p.y += (top - f);
+            this.pl.v.y = 0;
+            this.pl.on = true;
+            return;
+        }
+
+        this.pl.on = false;
     }
 
     async hit() {
