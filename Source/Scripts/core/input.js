@@ -28,6 +28,7 @@ export function installInput(game) {
             if (game.audio && !game._musicStarted) {
                 game._musicStarted = true;
                 game.audio.startMusicPlaylist([
+                    "./Source/Assets/Audio/Music/Quick Harvest.m4a",
                     "./Source/Assets/Audio/Music/Country Roads.m4a",
                     "./Source/Assets/Audio/Music/Open Fields.m4a"
                 ]);
