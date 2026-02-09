@@ -3,28 +3,24 @@
 export class AudioManager {
     constructor() {
         this.ctx = null;
-
         this.masterGain = null;
         this.sfxGain = null;
         this.footGain = null;
         this.musicGain = null;
-
         this.sfxVolume = 0.9;
         this.musicVolume = 0.50;
-
-        this._bufCache = new Map();     // url -> AudioBuffer
-        this._loadPromises = new Map(); // url -> Promise<AudioBuffer>
-        this._lastPlay = new Map();     // key(name) -> time (seconds)
-
-        this._activeVoices = new Map(); // key(name) -> count
+        this._bufCache = new Map();
+        this._loadPromises = new Map();
+        this._lastPlay = new Map();
+        this._activeVoices = new Map();
 
         this._music = {
             on: false,
             tracks: [],
             i: 0,
             src: null,
-            gen: 0,            // generation token to prevent overlap/races
-            nowPlaying: ""     // display name for UI
+            gen: 0,
+            nowPlaying: ""
         };
 
         this._footDuck = 1.0;
@@ -63,7 +59,6 @@ export class AudioManager {
             place_dirt: 2,
             bucket_fill: 1,
             bucket_pour: 1,
-
             footstep_grass: 1,
             footstep_path: 1,
             footstep_dirt: 1
@@ -77,27 +72,22 @@ export class AudioManager {
 
     _ensureCtx() {
         if (this.ctx) return;
-
         const AC = window.AudioContext || window.webkitAudioContext;
         this.ctx = new AC();
-
         this.masterGain = this.ctx.createGain();
         this.sfxGain = this.ctx.createGain();
         this.footGain = this.ctx.createGain();
         this.musicGain = this.ctx.createGain();
-
         this.masterGain.connect(this.ctx.destination);
         this.sfxGain.connect(this.masterGain);
         this.footGain.connect(this.masterGain);
         this.musicGain.connect(this.masterGain);
-
         this._applyVolumes(true);
         this._applyFootDuck(true);
     }
 
     _applyVolumes(immediate = false) {
         if (!this.masterGain) return;
-
         const sfx = Math.max(0, this.sfxVolume);
         const music = Math.max(0, this.musicVolume);
 
@@ -140,7 +130,6 @@ export class AudioManager {
         const f = Math.max(0, factor);
         const changed = (Math.abs(f - this._footDuck) > 1e-4);
         this._footDuck = f;
-
         const tau = (f < 1) ? attack : release;
         if (changed) this._applyFootDuck(false, Math.max(0.001, tau));
     }
@@ -231,17 +220,11 @@ export class AudioManager {
 
     async playSfx(nameOrUrl, opts = {}) {
         this._ensureCtx();
-
         const url = this._resolveSfxUrl(nameOrUrl);
         if (!url) return null;
-
         const key = `sfx:${nameOrUrl}`;
         if (!this._cooldownOk(key, opts.cooldown || 0)) return null;
-
-        const maxVoices =
-            (opts.maxVoices != null) ? opts.maxVoices :
-                (this._defaultMaxVoices[nameOrUrl] ?? 0);
-
+        const maxVoices = (opts.maxVoices != null) ? opts.maxVoices : (this._defaultMaxVoices[nameOrUrl] ?? 0);
         if (!this._canPlayVoice(nameOrUrl, maxVoices)) return null;
 
         let buf;
@@ -255,12 +238,9 @@ export class AudioManager {
         const src = this.ctx.createBufferSource();
         src.buffer = buf;
         src.playbackRate.value = this._pickPlaybackRate(opts.pitchRandom || 0);
-
         const g = this.ctx.createGain();
         g.gain.value = (opts.volume ?? 1);
-
         const bus = (opts.bus === "foot") ? this.footGain : this.sfxGain;
-
         src.connect(g);
         g.connect(bus);
 
@@ -271,20 +251,17 @@ export class AudioManager {
         };
 
         src.onended = done;
-
         try { src.start(); } catch { done(); }
-
         return src;
     }
 
     // -----------------------------
-    // Music playlist (no overlap)
+    // Music playlist
     // -----------------------------
     _stopCurrentMusicSource() {
         if (!this._music.src) return;
         const s = this._music.src;
         this._music.src = null;
-
         try { s.onended = null; } catch { }
         try { s.stop(); } catch { }
         try { s.disconnect(); } catch { }
