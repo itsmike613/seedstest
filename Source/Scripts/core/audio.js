@@ -24,6 +24,7 @@ export class AudioManager {
         };
 
         this._footDuck = 1.0;
+
         this.SFX_DIR = "./Source/Assets/Audio/SFX/";
         this.MUSIC_DIR = "./Source/Assets/Audio/Music/";
 
@@ -78,13 +79,17 @@ export class AudioManager {
         ]);
     }
 
+    _play(name, opts) {
+        return this.playSfx(name, opts);
+    }
+
     footstep(surface) {
         const name =
             (surface === "path") ? "footstep_path" :
                 (surface === "dirt") ? "footstep_dirt" :
                     "footstep_grass";
 
-        return this.playSfx(name, {
+        return this._play(name, {
             bus: "foot",
             volume: 0.16,
             pitchRandom: 0.08,
@@ -94,93 +99,47 @@ export class AudioManager {
     }
 
     pickup() {
-        return this.playSfx("pickup", {
-            volume: 0.65,
-            pitchRandom: 0.06,
-            cooldown: 0.04,
-            maxVoices: 2
-        });
+        return this._play("pickup", { volume: 0.65, pitchRandom: 0.06, cooldown: 0.04, maxVoices: 2 });
     }
 
     harvest() {
-        return this.playSfx("harvest", {
-            volume: 0.85,
-            pitchRandom: 0.06,
-            cooldown: 0.03
-        });
+        return this._play("harvest", { volume: 0.85, pitchRandom: 0.06, cooldown: 0.03 });
     }
 
     plant() {
-        return this.playSfx("plant", {
-            volume: 0.78,
-            pitchRandom: 0.08,
-            cooldown: 0.03
-        });
+        return this._play("plant", { volume: 0.78, pitchRandom: 0.08, cooldown: 0.03 });
     }
 
     hoe() {
-        return this.playSfx("hoe", {
-            volume: 0.8,
-            pitchRandom: 0.06,
-            cooldown: 0.03
-        });
+        return this._play("hoe", { volume: 0.8, pitchRandom: 0.06, cooldown: 0.03 });
     }
 
     shovel() {
-        return this.playSfx("shovel", {
-            volume: 0.75,
-            pitchRandom: 0.06,
-            cooldown: 0.03
-        });
+        return this._play("shovel", { volume: 0.75, pitchRandom: 0.06, cooldown: 0.03 });
     }
 
     placeDirt() {
-        return this.playSfx("place_dirt", {
-            volume: 0.72,
-            pitchRandom: 0.06,
-            cooldown: 0.03
-        });
+        return this._play("place_dirt", { volume: 0.72, pitchRandom: 0.06, cooldown: 0.03 });
     }
 
     bucketFill() {
-        return this.playSfx("bucket_fill", {
-            volume: 0.9,
-            pitchRandom: 0.04,
-            cooldown: 0.06,
-            maxVoices: 1
-        });
+        return this._play("bucket_fill", { volume: 0.9, pitchRandom: 0.04, cooldown: 0.06, maxVoices: 1 });
     }
 
     bucketPour() {
-        return this.playSfx("bucket_pour", {
-            volume: 0.9,
-            pitchRandom: 0.04,
-            cooldown: 0.06,
-            maxVoices: 1
-        });
+        return this._play("bucket_pour", { volume: 0.9, pitchRandom: 0.04, cooldown: 0.06, maxVoices: 1 });
     }
 
     mineHit() {
-        return this.playSfx("mine_hit", {
-            volume: 0.42,
-            pitchRandom: 0.08,
-            cooldown: 0,
-            maxVoices: 1
-        });
+        return this._play("mine_hit", { volume: 0.42, pitchRandom: 0.08, cooldown: 0, maxVoices: 1 });
     }
 
     mineBreak() {
-        return this.playSfx("mine_break", {
-            volume: 0.82,
-            pitchRandom: 0.06,
-            cooldown: 0.02,
-            maxVoices: 2
-        });
+        return this._play("mine_break", { volume: 0.82, pitchRandom: 0.06, cooldown: 0.02, maxVoices: 2 });
     }
 
     setMiningActive(active) {
-        if (active) this.setFootDuck(0.55, 0.03, 0.12);
-        else this.setFootDuck(1.0, 0.03, 0.12);
+        this.setFootDuck(active ? 0.55 : 1.0, 0.03, 0.12);
     }
 
     // -----------------------------
@@ -196,10 +155,11 @@ export class AudioManager {
         if (this.ctx) return;
         const AC = window.AudioContext || window.webkitAudioContext;
         this.ctx = new AC();
-        this.masterGain = this.ctx.createGain();
-        this.sfxGain = this.ctx.createGain();
-        this.footGain = this.ctx.createGain();
-        this.musicGain = this.ctx.createGain();
+        const mkGain = () => this.ctx.createGain();
+        this.masterGain = mkGain();
+        this.sfxGain = mkGain();
+        this.footGain = mkGain();
+        this.musicGain = mkGain();
         this.masterGain.connect(this.ctx.destination);
         this.sfxGain.connect(this.masterGain);
         this.footGain.connect(this.masterGain);
@@ -208,32 +168,25 @@ export class AudioManager {
         this._applyFootDuck(true);
     }
 
+    _setGain(node, value, immediate, tau) {
+        if (!node) return;
+        if (immediate) node.gain.value = value;
+        else node.gain.setTargetAtTime(value, this.ctx.currentTime, tau);
+    }
+
     _applyVolumes(immediate = false) {
         if (!this.masterGain) return;
         const sfx = Math.max(0, this.sfxVolume);
         const music = Math.max(0, this.musicVolume);
-
-        if (immediate) {
-            this.sfxGain.gain.value = sfx;
-            this.musicGain.gain.value = music;
-        } else {
-            const t = this.ctx.currentTime;
-            this.sfxGain.gain.setTargetAtTime(sfx, t, 0.02);
-            this.musicGain.gain.setTargetAtTime(music, t, 0.03);
-        }
+        this._setGain(this.sfxGain, sfx, immediate, 0.02);
+        this._setGain(this.musicGain, music, immediate, 0.03);
     }
 
     _applyFootDuck(immediate = false, tau = 0.03) {
         if (!this.footGain) return;
         const base = Math.max(0, this.sfxVolume);
         const v = base * Math.max(0, this._footDuck);
-
-        if (immediate) {
-            this.footGain.gain.value = v;
-        } else {
-            const t = this.ctx.currentTime;
-            this.footGain.gain.setTargetAtTime(v, t, tau);
-        }
+        this._setGain(this.footGain, v, immediate, tau);
     }
 
     setSfxVolume(v) {
@@ -258,16 +211,13 @@ export class AudioManager {
 
     async preloadSfx(names = []) {
         this._ensureCtx();
-        const urls = names
-            .map(n => this._resolveSfxUrl(n))
-            .filter(Boolean);
+        const urls = names.map(n => this._resolveSfxUrl(n)).filter(Boolean);
         await Promise.allSettled(urls.map(u => this._loadBuffer(u)));
     }
 
     _resolveSfxUrl(nameOrUrl) {
         if (!nameOrUrl) return null;
-        if (this.sfx[nameOrUrl]) return this.sfx[nameOrUrl];
-        return nameOrUrl;
+        return this.sfx[nameOrUrl] || nameOrUrl;
     }
 
     _resolveMusicUrl(nameOrUrl) {
@@ -278,12 +228,14 @@ export class AudioManager {
 
     async _loadBuffer(url) {
         this._ensureCtx();
-        if (this._bufCache.has(url)) return this._bufCache.get(url);
-        if (this._loadPromises.has(url)) return this._loadPromises.get(url);
+        const cached = this._bufCache.get(url);
+        if (cached) return cached;
+        const inflight = this._loadPromises.get(url);
+        if (inflight) return inflight;
 
         const p = (async () => {
             const res = await fetch(url);
-            if (!res.ok) throw new Error(`Audio fetch failed (${res.status}): ${url}`);
+            if (!res.ok) throw new Error(`Audio fetch failed(${res.status}): ${url} `);
             const arr = await res.arrayBuffer();
             const buf = await this.ctx.decodeAudioData(arr);
             this._bufCache.set(url, buf);
@@ -293,8 +245,7 @@ export class AudioManager {
         this._loadPromises.set(url, p);
 
         try {
-            const buf = await p;
-            return buf;
+            return await p;
         } finally {
             this._loadPromises.delete(url);
         }
@@ -307,7 +258,7 @@ export class AudioManager {
     _cooldownOk(key, cooldown) {
         if (!cooldown || cooldown <= 0) return true;
         const t = this._now();
-        const last = this._lastPlay.get(key) || -Infinity;
+        const last = this._lastPlay.get(key) ?? -Infinity;
         if ((t - last) < cooldown) return false;
         this._lastPlay.set(key, t);
         return true;
@@ -320,7 +271,7 @@ export class AudioManager {
     }
 
     _voiceKey(nameOrUrl) {
-        return `voice:${nameOrUrl}`;
+        return `voice:${nameOrUrl} `;
     }
 
     _canPlayVoice(nameOrUrl, maxVoices) {
@@ -344,7 +295,7 @@ export class AudioManager {
         this._ensureCtx();
         const url = this._resolveSfxUrl(nameOrUrl);
         if (!url) return null;
-        const key = `sfx:${nameOrUrl}`;
+        const key = `sfx:${nameOrUrl} `;
         if (!this._cooldownOk(key, opts.cooldown || 0)) return null;
         const maxVoices = (opts.maxVoices != null) ? opts.maxVoices : (this._defaultMaxVoices[nameOrUrl] ?? 0);
         if (!this._canPlayVoice(nameOrUrl, maxVoices)) return null;
@@ -381,8 +332,8 @@ export class AudioManager {
     // Music playlist
     // -----------------------------
     _stopCurrentMusicSource() {
-        if (!this._music.src) return;
         const s = this._music.src;
+        if (!s) return;
         this._music.src = null;
         try { s.onended = null; } catch { }
         try { s.stop(); } catch { }
@@ -442,16 +393,19 @@ export class AudioManager {
             if (this._music.on && gen === this._music.gen) this._startNextTrack(gen);
             return;
         }
+
         if (!this._music.on) return;
-        if (gen !== this._music.gen) return;
+        if (gen !== this._music.gen) return
         const src = this.ctx.createBufferSource();
         src.buffer = buf;
         src.connect(this.musicGain);
+
         src.onended = () => {
             if (!this._music.on) return;
             if (gen !== this._music.gen) return;
             this._startNextTrack(gen);
         };
+
         this._music.src = src;
         try { src.start(); } catch { /* ignore */ }
     }
