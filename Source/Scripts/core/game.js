@@ -1,51 +1,38 @@
 // Source/Scripts/core/game.js
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
-
 import { conf } from "../config/conf.js";
 import { W, H, Y1, INF, YB } from "../config/constants.js";
 import { clamp } from "../util/math.js";
 import { key } from "../util/gridKey.js";
-
 import { items } from "../data/items.js";
 import { blocks } from "../data/blocks.js";
-
 import { Bag } from "../inventory/bag.js";
 import { UI } from "../ui/ui.js";
-
 import { Tex } from "../gfx/tex.js";
 import { Sky } from "../gfx/sky.js";
 import { CrackOverlay } from "../gfx/crackOverlay.js";
 import { Hologram } from "../gfx/hologram.js";
-
 import { Vox } from "../world/world.js";
 import { raycastBlock } from "./raycast.js";
 import { K, installInput } from "./input.js";
-
 import { AudioManager } from "./audio.js";
 
 export class Game {
     constructor(root) {
         this.root = root;
         this.conf = conf;
-
-        // --- three ---
         this.ren = new THREE.WebGLRenderer({ canvas: this.root.el.c, antialias: true });
         this.ren.setPixelRatio(Math.min(devicePixelRatio, 2));
         this.ren.setSize(innerWidth, innerHeight, false);
-
         this.ren.outputColorSpace = THREE.SRGBColorSpace;
         this.ren.toneMapping = THREE.ACESFilmicToneMapping;
         this.ren.toneMappingExposure = 1.08;
-
         this.ren.shadowMap.enabled = true;
         this.ren.shadowMap.type = THREE.PCFSoftShadowMap;
-
         this.ren.setClearColor(0x69b7ff, 1);
-
         this.scene = new THREE.Scene();
         this.scene.fog = new THREE.Fog(0x69b7ff, 22, 62);
-
         this.cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.01, 200);
 
         // --- lighting ---
@@ -61,7 +48,6 @@ export class Game {
         this.sun.shadow.camera.bottom = -18;
         this.sun.shadow.bias = -0.00035;
         this.scene.add(this.sun);
-
         this.hemi = new THREE.HemisphereLight(0xcfefff, 0x3b3f4a, 0.55);
         this.scene.add(this.hemi);
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.20));
@@ -75,8 +61,6 @@ export class Game {
 
         // --- audio ---
         this.audio = new AudioManager();
-
-        // pickup sound only when pickup succeeds and item is removed
         this.vox.setOnPickup(() => {
             this.audio.playSfx("pickup", {
                 volume: 0.65,
@@ -103,8 +87,6 @@ export class Game {
         this.lock = false;
         this.open = false;
         this.tab = false;
-
-        // mining state
         this.mine = {
             on: false,
             k: "",
@@ -113,8 +95,6 @@ export class Game {
             need: 0.8,
             hitT: 0
         };
-
-        // footsteps state (timed steps)
         this._foot = { t: 0 };
 
         // --- raycast ---
@@ -203,9 +183,7 @@ export class Game {
         const i = Number(el.dataset.i);
         const hot = el.dataset.h === "1";
         const shift = e.shiftKey;
-
         if (shift) { this.bag.moveQuick(i, hot); return; }
-
         const arr = hot ? this.bag.hot : this.bag.inv;
         const cur = arr[i];
 
@@ -256,27 +234,21 @@ export class Game {
         const f = this.facing();
         const up = new THREE.Vector3(0, 1, 0);
         const r = new THREE.Vector3().crossVectors(f, up).normalize();
-
         let ax = 0, az = 0;
         if (K["KeyW"]) { ax += f.x; az += f.z; }
         if (K["KeyS"]) { ax -= f.x; az -= f.z; }
         if (K["KeyA"]) { ax -= r.x; az -= r.z; }
         if (K["KeyD"]) { ax += r.x; az += r.z; }
-
         const len = Math.hypot(ax, az);
         if (len > 0) { ax /= len; az /= len; }
-
         const sp = (K["ControlLeft"] || K["ControlRight"]) ? conf.sprint : conf.walk;
         const fr = this.pl.on ? conf.fr : conf.air;
-
         this.pl.v.x = this.damp(this.pl.v.x, ax * sp, fr, dt);
         this.pl.v.z = this.damp(this.pl.v.z, az * sp, fr, dt);
-
         if (this.pl.on && K["Space"]) {
             this.pl.v.y = conf.jump;
             this.pl.on = false;
         }
-
         this.pl.v.y -= conf.grav * dt;
     }
 
@@ -292,11 +264,9 @@ export class Game {
 
         // --- vertical ---
         this.pl.p.y += this.pl.v.y * dt;
-
         const cx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
         const cz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
         const floorTop = solidTop(cx, cz);
-
         const feet = this.pl.p.y - HEIGHT;
         if (feet < floorTop) {
             this.pl.p.y += (floorTop - feet);
@@ -313,17 +283,14 @@ export class Game {
             const maxX = clamp(Math.floor(x + R), 0, W - 1);
             const minZ = clamp(Math.floor(z - R), 0, H - 1);
             const maxZ = clamp(Math.floor(z + R), 0, H - 1);
-
             let nx = x;
 
             for (let bz = minZ; bz <= maxZ; bz++) {
                 for (let bx = minX; bx <= maxX; bx++) {
                     const top = solidTop(bx, bz);
                     if (top <= feetY + EPS) continue;
-
                     const closestX = clamp(nx, bx, bx + 1);
                     const closestZ = clamp(z, bz, bz + 1);
-
                     const dx = nx - closestX;
                     const dz = z - closestZ;
                     const dd = dx * dx + dz * dz;
@@ -342,17 +309,14 @@ export class Game {
             const maxX = clamp(Math.floor(x + R), 0, W - 1);
             const minZ = clamp(Math.floor(z - R), 0, H - 1);
             const maxZ = clamp(Math.floor(z + R), 0, H - 1);
-
             let nz = z;
 
             for (let bz = minZ; bz <= maxZ; bz++) {
                 for (let bx = minX; bx <= maxX; bx++) {
                     const top = solidTop(bx, bz);
                     if (top <= feetY + EPS) continue;
-
                     const closestX = clamp(x, bx, bx + 1);
                     const closestZ = clamp(nz, bz, bz + 1);
-
                     const dx = x - closestX;
                     const dz = nz - closestZ;
                     const dd = dx * dx + dz * dz;
@@ -369,11 +333,9 @@ export class Game {
         let nx = this.pl.p.x + this.pl.v.x * dt;
         nx = clamp(nx, R, W - R);
         nx = resolveX(nx, this.pl.p.z);
-
         let nz = this.pl.p.z + this.pl.v.z * dt;
         nz = clamp(nz, R, H - R);
         nz = resolveZ(nx, nz);
-
         this.pl.p.x = nx;
         this.pl.p.z = nz;
     }
@@ -393,7 +355,6 @@ export class Game {
         const bx = clamp(Math.floor(this.pl.p.x), 0, W - 1);
         const bz = clamp(Math.floor(this.pl.p.z), 0, H - 1);
         const id = this.vox.get(bx, Y1, bz);
-
         if (id === "path") return "footstep_path";
         if (id === "dirt" || id === "tilled_dry" || id === "tilled_wet") return "footstep_dirt";
         return "footstep_grass";
@@ -407,7 +368,6 @@ export class Game {
     async _footTick(dt, suppressThisFrame) {
         this._foot.t = Math.max(0, this._foot.t - dt);
         if (suppressThisFrame) return;
-
         const sp = Math.hypot(this.pl.v.x, this.pl.v.z);
         const moving = this.lock && !this.open && this.pl.on && sp > 0.35;
 
@@ -417,7 +377,6 @@ export class Game {
         }
 
         if (this._foot.t > 0) return;
-
         const name = this._footNameUnderPlayer();
 
         this.audio.playSfx(name, {
@@ -513,11 +472,9 @@ export class Game {
         if (s.k === "bucket_full") {
             if (h.py !== Y1) return;
             if (h.px === INF.x && h.py === INF.y && h.pz === INF.z) return;
-
             const dx = h.px + 0.5 - this.pl.p.x;
             const dz = h.pz + 0.5 - this.pl.p.z;
             if (Math.hypot(dx, dz) < 0.6) return;
-
             await this.vox.place(h.px, h.py, h.pz, "water");
             this.bag.hot[this.bag.sel] = { k: "bucket_empty", c: 1 };
             this.audio.playSfx("bucket_pour", { volume: 0.9, pitchRandom: 0.04, cooldown: 0.06, maxVoices: 1 });
@@ -528,11 +485,9 @@ export class Game {
         if (s.k === "dirt") {
             if (h.py !== Y1) return;
             if (h.px === INF.x && h.py === INF.y && h.pz === INF.z) return;
-
             const dx = h.px + 0.5 - this.pl.p.x;
             const dz = h.pz + 0.5 - this.pl.p.z;
             if (Math.hypot(dx, dz) < 0.6) return;
-
             const ok = await this.vox.place(h.px, h.py, h.pz, "dirt");
             if (ok) {
                 this.audio.playSfx("place_dirt", { volume: 0.72, pitchRandom: 0.06, cooldown: 0.03 });
@@ -661,39 +616,28 @@ export class Game {
         }
 
         this.camSync();
-
         const suppressStep = await this.mineTick(dt);
-
         await this.vox.hydrateTick();
         await this.vox.growTick();
         await this.vox.itemTick(dt, this.pl.p, this.bag);
-
         this.vox.visualTick();
         this.sky.tick();
-
         this.vox.partsTick(dt, this.cam);
-
         this.holo.tick(this.cam);
         this.tabTick(dt);
-
         await this._footTick(dt, suppressStep);
-
         this.ui.draw();
         this.ren.render(this.scene, this.cam);
-
         requestAnimationFrame(this.loop);
     }
 
     async start() {
         this.ui.build();
         installInput(this);
-
         this.sky.init();
-
         await this.crack.init();
         await this.vox.init();
         await this.holo.init();
-
         this.pl.p.set(1.35, 2.65, 1.35);
 
         this.audio.preloadSfx([
