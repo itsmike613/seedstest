@@ -9,6 +9,7 @@ export class CrackOverlay {
         this.tex = tex;
         this.m = [];
         this.tx = [];
+        this.sharedMat = null;
     }
 
     async init() {
@@ -22,47 +23,49 @@ export class CrackOverlay {
         ];
         for (const u of urls) this.tx.push(await this.tex.get(u));
 
-        const mat = new THREE.MeshBasicMaterial({
+        this.sharedMat = new THREE.MeshBasicMaterial({
             map: this.tx[0],
             transparent: true,
             depthWrite: false,
             opacity: 0.95,
-            side: THREE.DoubleSide,
             polygonOffset: true,
-            polygonOffsetFactor: -2,
-            polygonOffsetUnits: -2
+            polygonOffsetFactor: -4,
+            polygonOffsetUnits: -4
         });
 
-        const g = new THREE.PlaneGeometry(1.02, 1.02);
+        const g = new THREE.PlaneGeometry(1.01, 1.01); 
 
         const faces = [
-            { pos: new THREE.Vector3(0.5, 0.5, 1.001), rot: new THREE.Euler(0, 0, 0) },                 // +Z
-            { pos: new THREE.Vector3(0.5, 0.5, -0.001), rot: new THREE.Euler(0, Math.PI, 0) },            // -Z
-            { pos: new THREE.Vector3(1.001, 0.5, 0.5), rot: new THREE.Euler(0, -Math.PI * 0.5, 0) },     // +X
-            { pos: new THREE.Vector3(-0.001, 0.5, 0.5), rot: new THREE.Euler(0, Math.PI * 0.5, 0) },      // -X
-            { pos: new THREE.Vector3(0.5, 1.001, 0.5), rot: new THREE.Euler(-Math.PI * 0.5, 0, 0) },      // +Y
-            { pos: new THREE.Vector3(0.5, -0.001, 0.5), rot: new THREE.Euler(Math.PI * 0.5, 0, 0) }       // -Y
+            { pos: [0.5, 0.5, 1], rot: [0, 0, 0] },
+            { pos: [0.5, 0.5, 0], rot: [0, Math.PI, 0] },
+            { pos: [1, 0.5, 0.5], rot: [0, -Math.PI * 0.5, 0] },
+            { pos: [0, 0.5, 0.5], rot: [0, Math.PI * 0.5, 0] },
+            { pos: [0.5, 1, 0.5], rot: [-Math.PI * 0.5, 0, 0] },
+            { pos: [0.5, 0, 0.5], rot: [Math.PI * 0.5, 0, 0] }
         ];
 
-        this.m = [];
-        for (let i = 0; i < faces.length; i++) {
-            const mesh = new THREE.Mesh(g, mat.clone());
+        for (const f of faces) {
+            const mesh = new THREE.Mesh(g, this.sharedMat);
             mesh.visible = false;
-            mesh.renderOrder = 999;
             this.scene.add(mesh);
-            this.m.push({ mesh, localPos: faces[i].pos, localRot: faces[i].rot });
+            this.m.push({ 
+                mesh, 
+                offset: new THREE.Vector3(...f.pos), 
+                rot: new THREE.Euler(...f.rot) 
+            });
         }
     }
 
     show(x, y, z, stage) {
-        if (!this.m || this.m.length === 0) return;
-        const tx = this.tx[clamp(stage, 0, 5)];
+        if (!this.sharedMat) return;
+        const newTex = this.tx[clamp(stage, 0, 5)];
+        if (this.sharedMat.map !== newTex) {
+            this.sharedMat.map = newTex;
+        }
         for (const f of this.m) {
             f.mesh.visible = true;
-            f.mesh.position.set(x, y, z).add(f.localPos);
-            f.mesh.rotation.copy(f.localRot);
-            f.mesh.material.map = tx;
-            f.mesh.material.needsUpdate = true;
+            f.mesh.position.set(x + f.offset.x, y + f.offset.y, z + f.offset.z);
+            f.mesh.rotation.copy(f.rot);
         }
     }
 
